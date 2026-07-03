@@ -1,0 +1,12 @@
+{
+  "id": "{9B76B783-3F52-4EB4-A2FA-0D15C2D8E501}",
+  "author": "jotebu",
+  "name": "Bayrol PoolManager Integration",
+  "url": "https://github.com/jotebu/Symcon-Bayrol-Poolmanager-Integration",
+  "compatibility": {
+    "version": "6.0"
+  },
+  "version": "0.1",
+  "build": 1,
+  "date": 20260704
+}
