@@ -1,0 +1,15 @@
+{
+  "id": "{4132B13E-53C8-40D1-9E91-1E51D2D35F8C}",
+  "name": "Bayrol PoolManager 5",
+  "type": 3,
+  "vendor": "BAYROL",
+  "aliases": [
+    "BAYROL PoolManager 5",
+    "Bayrol PM5"
+  ],
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "BPM",
+  "url": "https://github.com/jotebu/Symcon-Bayrol-Poolmanager-Integration"
+}
