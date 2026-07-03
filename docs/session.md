@@ -22,19 +22,52 @@ Aus den bisher analysierten HAR-Dateien:
 
 | Eigenschaft | Beobachtung |
 |---|---|
-| Laenge | 32 Zeichen |
-| Zeichensatz | vermutlich `A-Z`, `a-z`, `0-9` |
+| Laenge in WebGUI | 32 Zeichen |
+| Zeichensatz in WebGUI | vermutlich `A-Z`, `a-z`, `0-9` |
 | Beispiel 1 | `dkJ5eSCEKcaMew65x6uQga4hSITXGppJ` |
 | Beispiel 2 | `U4ygEYBAZ62mMVPSopjC0ybREYLLhQb1` |
 | Cookie | bisher nicht beobachtet |
 | Set-Cookie | bisher nicht beobachtet |
 | Redirect zur SID | bisher nicht beobachtet |
 
-## Aktuelle Hypothese
+## Ergebnis SID-Akzeptanztest
 
-Die SID wird wahrscheinlich clientseitig durch JavaScript erzeugt und anschliessend beim ersten API-Request an den PM5 uebergeben.
+Ein Symcon-Testskript hat mehrere bewusst gewaehlte SIDs getestet:
 
-Die bisherige HAR-Datei beginnt bereits mit Requests, die eine SID enthalten. Deshalb ist die eigentliche SID-Erzeugung noch nicht nachgewiesen.
+```text
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+12345678901234567890123456789012
+<random-base62-32>
+<random-base62-32>
+```
+
+Alle getesteten SIDs konnten erfolgreich verwendet werden:
+
+1. Login per `set` auf `9.17401.user` und `9.17401.pass`
+2. anschliessendes Lesen per `get`
+3. Rueckgabe von pH, Redox und Temperatur
+
+Beispielwerte aus dem Test:
+
+| Key | Wert |
+|---|---:|
+| `34.4001.value` | `7.24` |
+| `34.4022.value` | `838` |
+| `34.4033.value` | `23.5` |
+
+## Aktuelle Schlussfolgerung
+
+Der PM5 akzeptiert offenbar clientseitig vorgegebene SIDs. Die SID muss fuer unsere Integration daher nicht vom PM5 angefordert werden.
+
+Fuer das Symcon-Modul reicht voraussichtlich folgender Ablauf:
+
+```text
+1. lokale SID erzeugen
+2. Login mit dieser SID ausfuehren
+3. alle Folge-Requests mit derselben SID senden
+4. bei Fehler erneut mit neuer SID einloggen
+```
 
 ## Login-Ablauf
 
@@ -74,24 +107,21 @@ Interpretation:
 
 ## Noch offen
 
-- Wird die SID vom Browser-JavaScript erzeugt oder vom PM5 geliefert?
-- Akzeptiert der PM5 beliebige 32-stellige alphanumerische SIDs?
+- Sind auch kuerzere oder laengere SIDs gueltig?
+- Sind Sonderzeichen erlaubt oder nur alphanumerische Zeichen?
 - Wie lange bleibt eine SID gueltig?
 - Wird eine SID durch Logout oder Timeout geloescht?
-- Sind mehrere parallele Sessions moeglich?
-- Welche Fehlercodes werden bei ungueltiger SID oder falschem Login geliefert?
+- Sind mehrere parallele Sessions dauerhaft stabil moeglich?
+- Welche Fehlercodes werden bei falschem Login geliefert?
 
-## Naechster Test
+## Naechste Tests
 
-Eine neue HAR-Aufzeichnung muss vor dem ersten Aufruf der PM5-Weboberflaeche starten:
+Empfohlene Minimaltests:
 
-1. Chrome DevTools oeffnen
-2. Network aktivieren
-3. Preserve log aktivieren
-4. Disable cache aktivieren
-5. Browser-Tab komplett leer starten
-6. `http://<pm5-ip>/` aufrufen
-7. Login durchfuehren
-8. HAR mit Inhalt speichern
+1. Lesen ohne vorherigen Login mit neuer SID
+2. Login mit falschem Passwort/PIN
+3. Lesen mit SID nach laengerer Pause, z. B. 10 Minuten, 30 Minuten, 60 Minuten
+4. Test mit kurzer SID, z. B. `A`
+5. Test mit SID ohne Parameter, also leerer `sid=`
 
-Wichtig ist der allererste Request auf `/` oder `/cgi-bin/webgui.fcgi` ohne bekannte SID.
+Diese Tests klaeren, wie viel Session-Handling das Modul wirklich benoetigt.
