@@ -1,0 +1,45 @@
+{
+  "elements": [
+    {
+      "type": "ValidationTextBox",
+      "name": "Host",
+      "caption": "IP-Adresse / Host"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "Port",
+      "caption": "Port",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    {
+      "type": "ValidationTextBox",
+      "name": "Username",
+      "caption": "Benutzername"
+    },
+    {
+      "type": "PasswordTextBox",
+      "name": "Password",
+      "caption": "Passwort / PIN"
+    },
+    {
+      "type": "NumberSpinner",
+      "name": "PollInterval",
+      "caption": "Abfrageintervall in Sekunden",
+      "minimum": 5,
+      "maximum": 3600
+    }
+  ],
+  "actions": [
+    {
+      "type": "Button",
+      "caption": "Verbindung testen",
+      "onClick": "BPM_TestConnection($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "Werte jetzt aktualisieren",
+      "onClick": "BPM_Update($id);"
+    }
+  ]
+}
