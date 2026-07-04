@@ -1,0 +1,15 @@
+{
+  "id": "{6B5E5A5D-0F3B-4C78-B939-3C8B7E6E30A1}",
+  "name": "Bayrol PoolManager Discovery",
+  "type": 4,
+  "vendor": "BAYROL",
+  "aliases": [
+    "Bayrol PoolManager Discovery",
+    "Bayrol PM5 Discovery",
+    "Bayrol PM5 Reverse Engineering"
+  ],
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "BPD"
+}
