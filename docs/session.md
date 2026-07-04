@@ -56,18 +56,53 @@ Beispielwerte aus dem Test:
 | `34.4022.value` | `838` |
 | `34.4033.value` | `23.5` |
 
-## Aktuelle Schlussfolgerung
+## Lesen ohne Login
 
-Der PM5 akzeptiert offenbar clientseitig vorgegebene SIDs. Die SID muss fuer unsere Integration daher nicht vom PM5 angefordert werden.
+Ein weiterer Symcon-Test hat gezeigt, dass reine Lesezugriffe auf Messwerte auch ohne vorherigen Login funktionieren.
 
-Fuer das Symcon-Modul reicht voraussichtlich folgender Ablauf:
+Getestete SIDs:
 
 ```text
-1. lokale SID erzeugen
-2. Login mit dieser SID ausfuehren
-3. alle Folge-Requests mit derselben SID senden
-4. bei Fehler erneut mit neuer SID einloggen
+NOLOGINTEST00000000000000000001
+NOLOGINTEST00000000000000000002
 ```
+
+Anfrage:
+
+```json
+{
+  "get": [
+    "34.4001.value",
+    "34.4022.value",
+    "34.4033.value"
+  ]
+}
+```
+
+Antwort jeweils erfolgreich:
+
+```json
+{
+  "data": {
+    "34.4001.value": "7.24",
+    "34.4022.value": "838",
+    "34.4033.value": "23.4"
+  },
+  "status": {
+    "code": 0
+  },
+  "event": {
+    "type": 1,
+    "data": "48.30000.0"
+  }
+}
+```
+
+Schlussfolgerung:
+
+- Fuer reine Monitoring-Werte ist kein Login erforderlich.
+- Das Symcon-Modul kann Messwerte zunaechst ohne Benutzername/PIN lesen.
+- Login sollte nur fuer geschuetzte oder schreibende Funktionen erforderlich sein.
 
 ## Login-Ablauf
 
@@ -105,23 +140,59 @@ Interpretation:
 | `event.type = 1` | Navigation / Seitenwechsel |
 | `event.data = 3.16901.0` | Zielseite nach Login, vermutlich Home |
 
+## Login mit falschem Passwort/PIN
+
+Ein Test mit falschem Passwort/PIN lieferte:
+
+```json
+{
+  "data": {},
+  "status": {
+    "code": 3
+  },
+  "event": {
+    "type": 1,
+    "data": "7.12558.0"
+  }
+}
+```
+
+Interpretation:
+
+| Feld | Bedeutung |
+|---|---|
+| `status.code = 3` | Login fehlgeschlagen / falsche Zugangsdaten |
+| `event.data = 7.12558.0` | Fehler-/Login-Seite oder Hinweisdialog |
+
+Wichtig: Direkt nach einem fehlgeschlagenen Login konnten Messwerte mit derselben SID weiterhin gelesen werden. Das bestaetigt, dass die getesteten Messwert-Keys nicht authentifizierungspflichtig sind.
+
+## Aktuelle Modul-Strategie
+
+Fuer die erste Modulversion sollte gelten:
+
+```text
+1. lokale SID erzeugen oder feste Modul-SID verwenden
+2. Messwerte per get ohne Login lesen
+3. Login nur optional fuer spaetere geschuetzte Funktionen verwenden
+4. bei API-Fehler nicht automatisch Login erzwingen, sondern Fehlercode auswerten
+```
+
 ## Noch offen
 
+- Welche API-Keys sind ohne Login lesbar?
+- Welche API-Keys benoetigen Login?
 - Sind auch kuerzere oder laengere SIDs gueltig?
 - Sind Sonderzeichen erlaubt oder nur alphanumerische Zeichen?
 - Wie lange bleibt eine SID gueltig?
 - Wird eine SID durch Logout oder Timeout geloescht?
 - Sind mehrere parallele Sessions dauerhaft stabil moeglich?
-- Welche Fehlercodes werden bei falschem Login geliefert?
+- Gibt es weitere Fehlercodes ausser `0` und `3`?
 
 ## Naechste Tests
 
 Empfohlene Minimaltests:
 
-1. Lesen ohne vorherigen Login mit neuer SID
-2. Login mit falschem Passwort/PIN
-3. Lesen mit SID nach laengerer Pause, z. B. 10 Minuten, 30 Minuten, 60 Minuten
-4. Test mit kurzer SID, z. B. `A`
-5. Test mit SID ohne Parameter, also leerer `sid=`
-
-Diese Tests klaeren, wie viel Session-Handling das Modul wirklich benoetigt.
+1. Test mit kurzer SID, z. B. `A`
+2. Test mit leerem `sid=`
+3. Test mit API-Keys aus weiteren WebGUI-Seiten ohne Login
+4. Test mit mutmasslich schreibenden `set`-Operationen nur nach ausdruecklicher Freigabe
