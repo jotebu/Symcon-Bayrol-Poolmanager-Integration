@@ -24,6 +24,19 @@ class BayrolPoolManager5 extends IPSModule
         'FilterPumpText' => '55.17106.value'
     ];
 
+    private const KNOWN_KEYS = [
+        '34.4001.value' => 'pH',
+        '34.4022.value' => 'Redox',
+        '34.4033.value' => 'Pooltemperatur',
+        '13.16507.text2' => 'Aussentemperatur T3',
+        '13.16509.text1' => 'Leitfaehigkeit',
+        '55.17102.status' => 'Poollicht Status',
+        '55.17102.value' => 'Poollicht Text',
+        '55.17106.status' => 'Filterpumpe Status',
+        '55.17106.opmode' => 'Filterpumpe Betriebsart',
+        '55.17106.value' => 'Filterpumpe Text'
+    ];
+
     public function Create()
     {
         parent::Create();
@@ -41,6 +54,11 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterPropertyString('DiscoverySuffixes', "value\nstatus\nopmode\ntext1\ntext2");
         $this->RegisterPropertyInteger('DiscoveryMaxKeys', 500);
         $this->RegisterPropertyInteger('DiscoveryBatchSize', 50);
+        $this->RegisterPropertyString('DiscoveryFilterKey', '');
+        $this->RegisterPropertyString('DiscoveryFilterValue', '');
+        $this->RegisterPropertyString('DiscoveryFilterType', '');
+        $this->RegisterPropertyBoolean('DiscoveryOnlyFound', true);
+        $this->RegisterPropertyString('FavoriteKeys', '');
         $this->RegisterPropertyString('SelectedImportKeys', '');
 
         $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
@@ -82,31 +100,42 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'TextBox', 'name' => 'DiscoverySuffixes', 'caption' => 'Discovery Suffixe, ein Suffix pro Zeile'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryMaxKeys', 'caption' => 'Maximale Discovery-Keys pro Lauf'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryBatchSize', 'caption' => 'Discovery Batchgroesse'],
-                ['type' => 'TextBox', 'name' => 'SelectedImportKeys', 'caption' => 'Ausgewaehlte Keys fuer spaeteren Import, ein Key pro Zeile']
+                ['type' => 'Label', 'caption' => 'Discovery Filter und Auswahl'],
+                ['type' => 'ValidationTextBox', 'name' => 'DiscoveryFilterKey', 'caption' => 'Filter API-Key enthaelt'],
+                ['type' => 'ValidationTextBox', 'name' => 'DiscoveryFilterValue', 'caption' => 'Filter Wert enthaelt'],
+                ['type' => 'ValidationTextBox', 'name' => 'DiscoveryFilterType', 'caption' => 'Filter Typ enthaelt'],
+                ['type' => 'CheckBox', 'name' => 'DiscoveryOnlyFound', 'caption' => 'Nur gefundene Datenpunkte anzeigen'],
+                ['type' => 'TextBox', 'name' => 'FavoriteKeys', 'caption' => 'Favoriten-Keys, ein Key pro Zeile'],
+                ['type' => 'TextBox', 'name' => 'SelectedImportKeys', 'caption' => 'Ausgewaehlte Import-Keys, ein Key pro Zeile']
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'],
                 ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'],
                 ['type' => 'Button', 'caption' => 'Explorer jetzt ausfuehren', 'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'],
                 ['type' => 'Button', 'caption' => 'Discovery-Assistent ausfuehren', 'onClick' => 'BPM_RunDiscovery($id); echo "Discovery ausgefuehrt. Es wurden keine Datenpunkte automatisch angelegt. Ergebnis siehe Discovery Ergebnis.";'],
+                ['type' => 'Button', 'caption' => 'Ausgewaehlte Datenpunkte uebernehmen', 'onClick' => 'BPM_ImportSelectedKeys($id); echo "Import ist in dieser Alpha noch gesperrt. Ausgewaehlte Keys wurden nur validiert und dokumentiert.";'],
                 ['type' => 'Label', 'caption' => 'Discovery Ergebnisliste: Anzeige nur zur Auswahl/Pruefung. Kein Datenpunkt wird automatisch importiert.'],
                 [
                     'type' => 'List',
                     'name' => 'DiscoveryResultList',
                     'caption' => 'Gefundene Datenpunkte',
-                    'rowCount' => 12,
+                    'rowCount' => 15,
                     'add' => false,
                     'delete' => false,
-                    'sort' => ['column' => 'key', 'direction' => 'ascending'],
+                    'sort' => ['column' => 'confidence', 'direction' => 'ascending'],
                     'columns' => [
-                        ['name' => 'selected', 'caption' => 'Import', 'width' => '70px', 'add' => false, 'edit' => false],
+                        ['name' => 'favorite', 'caption' => 'Fav', 'width' => '50px', 'add' => '', 'edit' => false],
+                        ['name' => 'selected', 'caption' => 'Import', 'width' => '70px', 'add' => '', 'edit' => false],
+                        ['name' => 'confidence', 'caption' => 'Vertrauen', 'width' => '160px', 'add' => '', 'edit' => false],
                         ['name' => 'key', 'caption' => 'API-Key', 'width' => '220px', 'add' => '', 'edit' => false],
+                        ['name' => 'name', 'caption' => 'Name/Vorschlag', 'width' => '180px', 'add' => '', 'edit' => false],
                         ['name' => 'value', 'caption' => 'Wert', 'width' => '220px', 'add' => '', 'edit' => false],
-                        ['name' => 'type', 'caption' => 'Typ', 'width' => '120px', 'add' => '', 'edit' => false]
+                        ['name' => 'type', 'caption' => 'Typ', 'width' => '130px', 'add' => '', 'edit' => false]
                     ],
                     'values' => $this->BuildDiscoveryListValues()
                 ],
-                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer und sichere Discovery-Ergebnisliste ohne Auto-Import.']
+                ['type' => 'Label', 'caption' => 'Vertrauen: gruen = bekannt/getestet, gelb = plausibel/noch unbekannt, rot = neu/auffaellig. Import bleibt bis nach dem Test deaktiviert.'],
+                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer, Discovery-Ergebnisliste, Filter, Favoriten und Vertrauensstufen ohne Auto-Import.']
             ],
             'status' => [
                 ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'Aktiv'],
@@ -223,11 +252,16 @@ class BayrolPoolManager5 extends IPSModule
         $batchSize = max(1, min(100, $this->ReadPropertyInteger('DiscoveryBatchSize')));
         $chunks = array_chunk($keys, $batchSize);
         $found = [];
+        $tested = [];
         $totalDuration = 0;
 
         try {
             foreach ($chunks as $index => $chunk) {
                 $this->SendDebugMessage('Discovery batch', ($index + 1) . '/' . count($chunks) . ' with ' . count($chunk) . ' keys');
+                foreach ($chunk as $key) {
+                    $tested[$key] = ['value' => '', 'type' => 'not-found', 'confidence' => 'rot - nicht gefunden', 'name' => ''];
+                }
+
                 $response = $this->ApiGet($chunk);
                 $data = $response['data'] ?? [];
                 $totalDuration += (int)($response['_meta']['duration_ms'] ?? 0);
@@ -244,21 +278,28 @@ class BayrolPoolManager5 extends IPSModule
                     if ($clean === '') {
                         continue;
                     }
-                    $found[$key] = [
+                    $entry = [
                         'value' => $clean,
                         'type' => $this->DetectValueType($clean),
-                        'selected' => false
+                        'confidence' => $this->GetConfidenceLevel($key, $clean),
+                        'name' => $this->GetKnownKeyName($key),
+                        'selected' => false,
+                        'favorite' => false
                     ];
+                    $found[$key] = $entry;
+                    $tested[$key] = $entry;
                 }
             }
 
             ksort($found);
+            ksort($tested);
             $output = [
                 'note' => 'Discovery ist rein lesend. Gefundene Datenpunkte werden nicht automatisch im Objektbaum angelegt.',
-                'next_step' => 'Gewuenschte Keys in SelectedImportKeys uebernehmen. Importfunktion folgt nach Testfreigabe.',
+                'next_step' => 'Gewuenschte Keys in SelectedImportKeys uebernehmen. Importfunktion bleibt bis nach dem Test gesperrt.',
                 'generated_keys' => $generated,
                 'found_count' => count($found),
-                'found' => $found
+                'found' => $found,
+                'tested' => $tested
             ];
             $raw = json_encode($output, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             if ($raw === false) {
@@ -275,6 +316,14 @@ class BayrolPoolManager5 extends IPSModule
             $this->SetValueSafe('DiscoveryResult', 'Discovery error: ' . $e->getMessage());
             $this->HandleError('Discovery', $e);
         }
+    }
+
+    public function ImportSelectedKeys(): void
+    {
+        $selected = $this->ParseKeyList($this->ReadPropertyString('SelectedImportKeys'));
+        $message = count($selected) . " Key(s) ausgewaehlt. Auto-Import ist in dieser Alpha absichtlich gesperrt.\n" . implode("\n", $selected);
+        $this->SetValueSafe('DiscoveryImportPreview', $message);
+        $this->SendDebugMessage('Import preview only', $message);
     }
 
     private function RegisterVariables(): void
@@ -311,6 +360,7 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterVariableInteger('DiscoveryFoundDataPoints', 'Discovery gefundene Datenpunkte', '', 402);
         $this->RegisterVariableInteger('DiscoveryResponseTimeMs', 'Discovery Antwortzeit gesamt', 'BPM.Milliseconds', 403);
         $this->RegisterVariableString('DiscoveryLastRun', 'Discovery letzter Lauf', '', 404);
+        $this->RegisterVariableString('DiscoveryImportPreview', 'Discovery Import Vorschau', '', 405);
     }
 
     private function CreateProfiles(): void
@@ -464,19 +514,46 @@ class BayrolPoolManager5 extends IPSModule
         }
 
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded) || !isset($decoded['found']) || !is_array($decoded['found'])) {
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $sourceKey = $this->ReadPropertyBoolean('DiscoveryOnlyFound') ? 'found' : 'tested';
+        if (!isset($decoded[$sourceKey]) || !is_array($decoded[$sourceKey])) {
             return [];
         }
 
         $selectedKeys = array_flip($this->ParseKeyList($this->ReadPropertyString('SelectedImportKeys')));
+        $favoriteKeys = array_flip($this->ParseKeyList($this->ReadPropertyString('FavoriteKeys')));
+        $filterKey = mb_strtolower(trim($this->ReadPropertyString('DiscoveryFilterKey')));
+        $filterValue = mb_strtolower(trim($this->ReadPropertyString('DiscoveryFilterValue')));
+        $filterType = mb_strtolower(trim($this->ReadPropertyString('DiscoveryFilterType')));
         $rows = [];
 
-        foreach ($decoded['found'] as $key => $info) {
+        foreach ($decoded[$sourceKey] as $key => $info) {
+            $value = (string)($info['value'] ?? '');
+            $type = (string)($info['type'] ?? 'unknown');
+            $name = (string)($info['name'] ?? $this->GetKnownKeyName((string)$key));
+            $confidence = (string)($info['confidence'] ?? $this->GetConfidenceLevel((string)$key, $value));
+
+            if ($filterKey !== '' && strpos(mb_strtolower((string)$key), $filterKey) === false) {
+                continue;
+            }
+            if ($filterValue !== '' && strpos(mb_strtolower($value), $filterValue) === false) {
+                continue;
+            }
+            if ($filterType !== '' && strpos(mb_strtolower($type), $filterType) === false) {
+                continue;
+            }
+
             $rows[] = [
+                'favorite' => isset($favoriteKeys[$key]) ? 'ja' : '',
                 'selected' => isset($selectedKeys[$key]) ? 'ja' : 'nein',
+                'confidence' => $confidence,
                 'key' => (string)$key,
-                'value' => (string)($info['value'] ?? ''),
-                'type' => (string)($info['type'] ?? 'unknown')
+                'name' => $name,
+                'value' => $value,
+                'type' => $type
             ];
         }
 
@@ -552,6 +629,28 @@ class BayrolPoolManager5 extends IPSModule
         }
 
         return array_values($keys);
+    }
+
+    private function GetKnownKeyName(string $key): string
+    {
+        return self::KNOWN_KEYS[$key] ?? '';
+    }
+
+    private function GetConfidenceLevel(string $key, string $value): string
+    {
+        if (isset(self::KNOWN_KEYS[$key])) {
+            return 'gruen - bekannt/getestet';
+        }
+
+        if ($value === '') {
+            return 'rot - nicht gefunden';
+        }
+
+        if (preg_match('/^(13|34|55)\.[0-9]+\.(value|status|opmode|text1|text2)$/', $key)) {
+            return 'gelb - plausibel/unbekannt';
+        }
+
+        return 'rot - neu/auffaellig';
     }
 
     private function DetectValueType(string $value): string
