@@ -43,13 +43,14 @@ class BayrolPoolManager extends IPSModule
 
         $this->CreateProfiles();
         $this->RegisterVariables();
-        $this->UpdateTimer();
 
         if (trim($this->ReadPropertyString('Host')) === '') {
+            $this->SetTimerInterval(self::TIMER_UPDATE, 0);
             $this->SetStatus(self::STATUS_HOST_MISSING);
             return;
         }
 
+        $this->UpdateTimer();
         $this->SetStatus(self::STATUS_INACTIVE);
     }
 
@@ -87,16 +88,16 @@ class BayrolPoolManager extends IPSModule
                 [
                     'type' => 'Button',
                     'caption' => 'Verbindung testen',
-                    'onClick' => 'BPM_TestConnection($id);'
+                    'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'
                 ],
                 [
                     'type' => 'Button',
                     'caption' => 'Werte jetzt aktualisieren',
-                    'onClick' => 'BPM_UpdateValues($id);'
+                    'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'
                 ],
                 [
                     'type' => 'Label',
-                    'caption' => 'Version 0.1.0: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
+                    'caption' => 'Version 0.1.0-alpha: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
                 ]
             ],
             'status' => [
@@ -132,10 +133,10 @@ class BayrolPoolManager extends IPSModule
             $response = $this->ApiGet(['34.4001.value']);
             $ok = isset($response['data']['34.4001.value']);
 
-            $this->SetValue('ConnectionState', $ok);
-            $this->SetValue('LastApiStatus', (int)($response['status']['code'] ?? -1));
-            $this->SetValue('LastError', $ok ? '' : 'API response does not contain pH key');
-            $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('ConnectionState', $ok);
+            $this->SetValueSafe('LastApiStatus', (int)($response['status']['code'] ?? -1));
+            $this->SetValueSafe('LastError', $ok ? '' : 'API response does not contain pH key');
+            $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
             $this->SetStatus($ok ? self::STATUS_ACTIVE : self::STATUS_API_ERROR);
 
             return $ok;
@@ -158,10 +159,10 @@ class BayrolPoolManager extends IPSModule
                 throw new Exception('Invalid API data block');
             }
 
-            $this->SetValue('ConnectionState', true);
-            $this->SetValue('LastApiStatus', (int)($response['status']['code'] ?? 0));
-            $this->SetValue('LastError', '');
-            $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('ConnectionState', true);
+            $this->SetValueSafe('LastApiStatus', (int)($response['status']['code'] ?? 0));
+            $this->SetValueSafe('LastError', '');
+            $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
 
             $this->UpdateKnownVariables($data);
             $this->SetStatus(self::STATUS_ACTIVE);
@@ -236,41 +237,41 @@ class BayrolPoolManager extends IPSModule
         $outdoorText = $this->CleanString((string)($data[self::API_KEYS['OutdoorTemperatureText']] ?? ''));
         $outdoor = $this->ExtractFirstNumber($outdoorText);
         if ($outdoor !== null) {
-            $this->SetValue('OutdoorTemperature', $outdoor);
+            $this->SetValueSafe('OutdoorTemperature', $outdoor);
         }
 
         $conductivityText = $this->CleanString((string)($data[self::API_KEYS['ConductivityText']] ?? ''));
         $conductivity = $this->ExtractFirstNumber($conductivityText);
         if ($conductivity !== null) {
-            $this->SetValue('Conductivity', $conductivity);
+            $this->SetValueSafe('Conductivity', $conductivity);
         }
 
         $lightStatus = $this->GetIntValue($data, self::API_KEYS['PoolLightStatus']);
         if ($lightStatus !== null) {
-            $this->SetValue('PoolLightActive', $lightStatus === 0);
+            $this->SetValueSafe('PoolLightActive', $lightStatus === 0);
         }
-        $this->SetValue('PoolLightText', $this->CleanString((string)($data[self::API_KEYS['PoolLightText']] ?? '')));
+        $this->SetValueSafe('PoolLightText', $this->CleanString((string)($data[self::API_KEYS['PoolLightText']] ?? '')));
 
         $filterStatus = $this->GetIntValue($data, self::API_KEYS['FilterPumpStatus']);
         if ($filterStatus !== null) {
-            $this->SetValue('FilterPumpActive', $filterStatus === 0);
+            $this->SetValueSafe('FilterPumpActive', $filterStatus === 0);
         }
 
         $filterOpmode = $this->GetIntValue($data, self::API_KEYS['FilterPumpOpmode']);
         if ($filterOpmode !== null) {
-            $this->SetValue('FilterPumpOpmode', $filterOpmode);
+            $this->SetValueSafe('FilterPumpOpmode', $filterOpmode);
         }
 
         $filterText = $this->CleanString((string)($data[self::API_KEYS['FilterPumpText']] ?? ''));
-        $this->SetValue('FilterPumpText', $filterText);
-        $this->SetValue('FilterPumpDetailedMode', $this->ParseFilterDetailedMode($filterText));
+        $this->SetValueSafe('FilterPumpText', $filterText);
+        $this->SetValueSafe('FilterPumpDetailedMode', $this->ParseFilterDetailedMode($filterText));
     }
 
     private function ApiGet(array $keys): array
     {
         $host = trim($this->ReadPropertyString('Host'));
-        $port = $this->ReadPropertyInteger('Port');
-        $timeout = $this->ReadPropertyInteger('Timeout');
+        $port = max(1, min(65535, $this->ReadPropertyInteger('Port')));
+        $timeout = max(1, $this->ReadPropertyInteger('Timeout'));
 
         if ($host === '') {
             throw new Exception('Host is empty');
@@ -280,8 +281,12 @@ class BayrolPoolManager extends IPSModule
         $url = 'http://' . $host . ':' . $port . '/cgi-bin/webgui.fcgi?sid=' . rawurlencode($sid);
         $payload = json_encode(['get' => array_values($keys)]);
 
+        if ($payload === false) {
+            throw new Exception('JSON payload encoding failed');
+        }
+
         $this->SendDebugMessage('API URL', $url);
-        $this->SendDebugMessage('API Payload', (string)$payload);
+        $this->SendDebugMessage('API Payload', $payload);
 
         $context = stream_context_create([
             'http' => [
@@ -304,7 +309,7 @@ class BayrolPoolManager extends IPSModule
         $this->SendDebugMessage('HTTP Code', (string)$httpCode);
         $this->SendDebugMessage('API Raw', (string)$raw);
 
-        if ($httpCode < 200 || $httpCode >= 300) {
+        if ($httpCode !== 0 && ($httpCode < 200 || $httpCode >= 300)) {
             throw new Exception('HTTP error ' . $httpCode);
         }
 
@@ -350,7 +355,7 @@ class BayrolPoolManager extends IPSModule
         }
         $value = str_replace(',', '.', $this->CleanString((string)$data[$key]));
         if (is_numeric($value)) {
-            $this->SetValue($ident, (float)$value);
+            $this->SetValueSafe($ident, (float)$value);
         }
     }
 
@@ -358,7 +363,7 @@ class BayrolPoolManager extends IPSModule
     {
         $value = $this->GetIntValue($data, $key);
         if ($value !== null) {
-            $this->SetValue($ident, $value);
+            $this->SetValueSafe($ident, $value);
         }
     }
 
@@ -407,11 +412,19 @@ class BayrolPoolManager extends IPSModule
 
     private function HandleError(string $context, Throwable $e): void
     {
-        $this->SetValue('ConnectionState', false);
-        $this->SetValue('LastError', $e->getMessage());
-        $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
+        $this->SetValueSafe('ConnectionState', false);
+        $this->SetValueSafe('LastError', $e->getMessage());
+        $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
         $this->SetStatus(self::STATUS_API_ERROR);
         $this->SendDebugMessage($context . ' error', $e->getMessage());
+    }
+
+    private function SetValueSafe(string $ident, $value): void
+    {
+        $id = @$this->GetIDForIdent($ident);
+        if ($id !== false && $id > 0) {
+            SetValue($id, $value);
+        }
     }
 
     private function SendDebugMessage(string $message, string $data): void
