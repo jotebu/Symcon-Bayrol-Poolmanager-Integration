@@ -194,16 +194,16 @@ class BayrolPoolManager extends IPSModule
 
     private function CreateProfiles(): void
     {
-        $this->CreateFloatProfile('BPM.pH', 'Intensity', '', '', 0, 14, 0.01, 2);
+        $this->CreateFloatProfile('BPM.pH', 'Gauge', '', '', 0, 14, 0.01, 2);
         $this->CreateIntegerProfile('BPM.Redox', 'Electricity', '', ' mV', 0, 1000, 1);
         $this->CreateFloatProfile('BPM.Conductivity', 'Electricity', '', ' mS/cm', 0, 20, 0.1, 1);
 
         if (!IPS_VariableProfileExists('BPM.FilterOpmode')) {
             IPS_CreateVariableProfile('BPM.FilterOpmode', VARIABLETYPE_INTEGER);
-            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 0, 'Auto', '', -1);
-            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 1, 'Manuell', '', -1);
-            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 2, 'Aus', '', -1);
         }
+        IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 0, 'Auto', '', -1);
+        IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 1, 'Manuell', '', -1);
+        IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 2, 'Aus', '', -1);
     }
 
     private function CreateFloatProfile(string $name, string $icon, string $prefix, string $suffix, float $min, float $max, float $step, int $digits): void
@@ -331,7 +331,7 @@ class BayrolPoolManager extends IPSModule
 
     private function CreateSid(): string
     {
-        return 'SYMBAYROL' . substr(strtoupper(md5((string)microtime(true) . random_int(0, PHP_INT_MAX))), 0, 23);
+        return 'SYMBAYROL' . substr(strtoupper(md5((string) microtime(true) . mt_rand())), 0, 23);
     }
 
     private function UpdateTimer(): void
