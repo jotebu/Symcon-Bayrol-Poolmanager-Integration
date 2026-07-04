@@ -33,6 +33,7 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterPropertyInteger('UpdateInterval', 60);
         $this->RegisterPropertyInteger('Timeout', 10);
         $this->RegisterPropertyBoolean('DebugMode', false);
+        $this->RegisterPropertyString('ExplorerKeys', "34.4001.value\n34.4022.value\n34.4033.value\n13.16507.text2\n13.16509.text1\n55.17106.status\n55.17106.opmode\n55.17106.value");
 
         $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
     }
@@ -82,6 +83,15 @@ class BayrolPoolManager5 extends IPSModule
                     'type' => 'CheckBox',
                     'name' => 'DebugMode',
                     'caption' => 'Erweiterte Debug-Ausgaben'
+                ],
+                [
+                    'type' => 'Label',
+                    'caption' => 'Explorer: Nur lesende JSON-POST get-Abfragen. Keine Schreib-/Aktorbefehle.'
+                ],
+                [
+                    'type' => 'TextBox',
+                    'name' => 'ExplorerKeys',
+                    'caption' => 'Explorer API-Keys, ein Key pro Zeile'
                 ]
             ],
             'actions' => [
@@ -96,8 +106,13 @@ class BayrolPoolManager5 extends IPSModule
                     'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'
                 ],
                 [
+                    'type' => 'Button',
+                    'caption' => 'Explorer jetzt ausfuehren',
+                    'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'
+                ],
+                [
                     'type' => 'Label',
-                    'caption' => 'Version 0.1.0-alpha: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
+                    'caption' => 'Version 0.1.0-alpha: Lesender Zugriff auf bekannte PM5 API-Datenpunkte plus sicherer Explorer-Modus.'
                 ]
             ],
             'status' => [
@@ -137,6 +152,7 @@ class BayrolPoolManager5 extends IPSModule
             $this->SetValueSafe('LastApiStatus', (int)($response['status']['code'] ?? -1));
             $this->SetValueSafe('LastError', $ok ? '' : 'API response does not contain pH key');
             $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('LastSuccessfulUpdate', $ok ? date('Y-m-d H:i:s') : '');
             $this->SetStatus($ok ? self::STATUS_ACTIVE : self::STATUS_API_ERROR);
 
             return $ok;
@@ -163,11 +179,54 @@ class BayrolPoolManager5 extends IPSModule
             $this->SetValueSafe('LastApiStatus', (int)($response['status']['code'] ?? 0));
             $this->SetValueSafe('LastError', '');
             $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('LastSuccessfulUpdate', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('ResponseTimeMs', (int)($response['_meta']['duration_ms'] ?? 0));
+            $this->SetValueSafe('ReceivedDataPoints', count($data));
 
             $this->UpdateKnownVariables($data);
             $this->SetStatus(self::STATUS_ACTIVE);
         } catch (Throwable $e) {
             $this->HandleError('UpdateValues', $e);
+        }
+    }
+
+    public function RunExplorer(): void
+    {
+        $keys = $this->GetExplorerKeys();
+        $this->SendDebugMessage('Explorer', 'Reading ' . count($keys) . ' keys');
+
+        if (count($keys) === 0) {
+            $this->SetValueSafe('ExplorerRawData', 'Keine Explorer-Keys konfiguriert.');
+            $this->SetValueSafe('ExplorerDataPoints', 0);
+            $this->SetValueSafe('ExplorerLastRun', date('Y-m-d H:i:s'));
+            return;
+        }
+
+        try {
+            $response = $this->ApiGet($keys);
+            $data = $response['data'] ?? [];
+
+            if (!is_array($data)) {
+                throw new Exception('Invalid explorer API data block');
+            }
+
+            ksort($data);
+            $raw = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($raw === false) {
+                $raw = 'Explorer JSON encoding failed';
+            }
+
+            $this->SetValueSafe('ExplorerRawData', $raw);
+            $this->SetValueSafe('ExplorerDataPoints', count($data));
+            $this->SetValueSafe('ExplorerLastRun', date('Y-m-d H:i:s'));
+            $this->SetValueSafe('ExplorerResponseTimeMs', (int)($response['_meta']['duration_ms'] ?? 0));
+            $this->SetValueSafe('ConnectionState', true);
+            $this->SetValueSafe('LastError', '');
+            $this->SetStatus(self::STATUS_ACTIVE);
+        } catch (Throwable $e) {
+            $this->SetValueSafe('ExplorerRawData', 'Explorer error: ' . $e->getMessage());
+            $this->SetValueSafe('ExplorerLastRun', date('Y-m-d H:i:s'));
+            $this->HandleError('Explorer', $e);
         }
     }
 
@@ -189,8 +248,16 @@ class BayrolPoolManager5 extends IPSModule
 
         $this->RegisterVariableBoolean('ConnectionState', 'Verbindung aktiv', '~Switch', 200);
         $this->RegisterVariableString('LastUpdate', 'Letzte Aktualisierung', '', 201);
-        $this->RegisterVariableInteger('LastApiStatus', 'Letzter API Status', '', 202);
-        $this->RegisterVariableString('LastError', 'Letzter Fehler', '', 203);
+        $this->RegisterVariableString('LastSuccessfulUpdate', 'Letzte erfolgreiche Aktualisierung', '', 202);
+        $this->RegisterVariableInteger('LastApiStatus', 'Letzter API Status', '', 203);
+        $this->RegisterVariableInteger('ResponseTimeMs', 'API Antwortzeit', 'BPM.Milliseconds', 204);
+        $this->RegisterVariableInteger('ReceivedDataPoints', 'Empfangene Datenpunkte', '', 205);
+        $this->RegisterVariableString('LastError', 'Letzter Fehler', '', 206);
+
+        $this->RegisterVariableString('ExplorerRawData', 'Explorer Rohdaten', '', 300);
+        $this->RegisterVariableInteger('ExplorerDataPoints', 'Explorer Datenpunkte', '', 301);
+        $this->RegisterVariableInteger('ExplorerResponseTimeMs', 'Explorer Antwortzeit', 'BPM.Milliseconds', 302);
+        $this->RegisterVariableString('ExplorerLastRun', 'Explorer letzter Lauf', '', 303);
     }
 
     private function CreateProfiles(): void
@@ -198,6 +265,7 @@ class BayrolPoolManager5 extends IPSModule
         $this->CreateFloatProfile('BPM.pH', 'Gauge', '', '', 0, 14, 0.01, 2);
         $this->CreateIntegerProfile('BPM.Redox', 'Electricity', '', ' mV', 0, 1000, 1);
         $this->CreateFloatProfile('BPM.Conductivity', 'Electricity', '', ' mS/cm', 0, 20, 0.1, 1);
+        $this->CreateIntegerProfile('BPM.Milliseconds', 'Clock', '', ' ms', 0, 60000, 1);
 
         if (!IPS_VariableProfileExists('BPM.FilterOpmode')) {
             IPS_CreateVariableProfile('BPM.FilterOpmode', VARIABLETYPE_INTEGER);
@@ -298,7 +366,9 @@ class BayrolPoolManager5 extends IPSModule
             ]
         ]);
 
+        $started = microtime(true);
         $raw = @file_get_contents($url, false, $context);
+        $durationMs = (int)round((microtime(true) - $started) * 1000);
         $headers = $http_response_header ?? [];
         $httpCode = $this->ExtractHttpCode($headers);
 
@@ -307,6 +377,7 @@ class BayrolPoolManager5 extends IPSModule
         }
 
         $this->SendDebugMessage('HTTP Code', (string)$httpCode);
+        $this->SendDebugMessage('API Duration', $durationMs . ' ms');
         $this->SendDebugMessage('API Raw', (string)$raw);
 
         if ($httpCode !== 0 && ($httpCode < 200 || $httpCode >= 300)) {
@@ -323,7 +394,34 @@ class BayrolPoolManager5 extends IPSModule
             throw new Exception('API status code ' . $apiStatus);
         }
 
+        $json['_meta'] = [
+            'duration_ms' => $durationMs,
+            'http_code' => $httpCode,
+            'requested_keys' => count($keys)
+        ];
+
         return $json;
+    }
+
+    private function GetExplorerKeys(): array
+    {
+        $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $this->ReadPropertyString('ExplorerKeys'));
+        $lines = explode("\n", $raw);
+        $keys = [];
+
+        foreach ($lines as $line) {
+            $key = trim($line);
+            if ($key === '' || strpos($key, '#') === 0 || strpos($key, '//') === 0) {
+                continue;
+            }
+            if (!preg_match('/^[0-9]+\.[0-9]+\.[A-Za-z0-9_]+$/', $key)) {
+                $this->SendDebugMessage('Explorer skipped invalid key', $key);
+                continue;
+            }
+            $keys[$key] = $key;
+        }
+
+        return array_values($keys);
     }
 
     private function ExtractHttpCode(array $headers): int
