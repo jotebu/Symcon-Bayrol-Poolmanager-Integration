@@ -112,7 +112,7 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'],
                 ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'],
                 ['type' => 'Button', 'caption' => 'Explorer jetzt ausfuehren', 'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'],
-                ['type' => 'Button', 'caption' => 'Discovery-Assistent ausfuehren', 'onClick' => 'BPM_RunDiscovery($id); echo "Discovery ausgefuehrt. Es wurden keine Datenpunkte automatisch angelegt. Ergebnis siehe Discovery Ergebnis.";'],
+                ['type' => 'Button', 'caption' => 'Discovery-Assistent ausfuehren', 'onClick' => 'BPM_RunDiscovery($id); echo "Discovery ausgefuehrt. Ergebnisliste wurde direkt aktualisiert. Es wurden keine Datenpunkte automatisch angelegt.";'],
                 ['type' => 'Button', 'caption' => 'Ausgewaehlte Datenpunkte uebernehmen', 'onClick' => 'BPM_ImportSelectedKeys($id); echo "Import ist in dieser Alpha noch gesperrt. Ausgewaehlte Keys wurden nur validiert und dokumentiert.";'],
                 ['type' => 'Label', 'caption' => 'Discovery Ergebnisliste: Anzeige nur zur Auswahl/Pruefung. Kein Datenpunkt wird automatisch importiert.'],
                 [
@@ -135,7 +135,7 @@ class BayrolPoolManager5 extends IPSModule
                     'values' => $this->BuildDiscoveryListValues()
                 ],
                 ['type' => 'Label', 'caption' => 'Vertrauen: gruen = bekannt/getestet, gelb = plausibel/noch unbekannt, rot = neu/auffaellig. Import bleibt bis nach dem Test deaktiviert.'],
-                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer, Discovery-Ergebnisliste, Filter, Favoriten und Vertrauensstufen ohne Auto-Import.']
+                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Discovery-Liste wird nach dem Lauf direkt im Formular aktualisiert.']
             ],
             'status' => [
                 ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'Aktiv'],
@@ -246,6 +246,7 @@ class BayrolPoolManager5 extends IPSModule
         if ($generated === 0) {
             $this->SetValueSafe('DiscoveryResult', 'Keine Discovery-Keys generiert.');
             $this->SetValueSafe('DiscoveryFoundDataPoints', 0);
+            $this->UpdateDiscoveryFormList([]);
             return;
         }
 
@@ -311,9 +312,11 @@ class BayrolPoolManager5 extends IPSModule
             $this->SetValueSafe('DiscoveryResponseTimeMs', $totalDuration);
             $this->SetValueSafe('ConnectionState', true);
             $this->SetValueSafe('LastError', '');
+            $this->UpdateDiscoveryFormList($this->BuildDiscoveryListRowsFromData($output));
             $this->SetStatus(self::STATUS_ACTIVE);
         } catch (Throwable $e) {
             $this->SetValueSafe('DiscoveryResult', 'Discovery error: ' . $e->getMessage());
+            $this->UpdateDiscoveryFormList([]);
             $this->HandleError('Discovery', $e);
         }
     }
@@ -518,6 +521,11 @@ class BayrolPoolManager5 extends IPSModule
             return [];
         }
 
+        return $this->BuildDiscoveryListRowsFromData($decoded);
+    }
+
+    private function BuildDiscoveryListRowsFromData(array $decoded): array
+    {
         $sourceKey = $this->ReadPropertyBoolean('DiscoveryOnlyFound') ? 'found' : 'tested';
         if (!isset($decoded[$sourceKey]) || !is_array($decoded[$sourceKey])) {
             return [];
@@ -558,6 +566,15 @@ class BayrolPoolManager5 extends IPSModule
         }
 
         return $rows;
+    }
+
+    private function UpdateDiscoveryFormList(array $rows): void
+    {
+        $encoded = json_encode($rows, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($encoded === false) {
+            $encoded = '[]';
+        }
+        $this->UpdateFormField('DiscoveryResultList', 'values', $encoded);
     }
 
     private function BuildDiscoveryKeys(): array
