@@ -34,6 +34,14 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterPropertyInteger('Timeout', 10);
         $this->RegisterPropertyBoolean('DebugMode', false);
         $this->RegisterPropertyString('ExplorerKeys', "34.4001.value\n34.4022.value\n34.4033.value\n13.16507.text2\n13.16509.text1\n55.17106.status\n55.17106.opmode\n55.17106.value");
+        $this->RegisterPropertyInteger('DiscoveryGroupStart', 34);
+        $this->RegisterPropertyInteger('DiscoveryGroupEnd', 55);
+        $this->RegisterPropertyInteger('DiscoveryObjectStart', 4000);
+        $this->RegisterPropertyInteger('DiscoveryObjectEnd', 17200);
+        $this->RegisterPropertyString('DiscoverySuffixes', "value\nstatus\nopmode\ntext1\ntext2");
+        $this->RegisterPropertyInteger('DiscoveryMaxKeys', 500);
+        $this->RegisterPropertyInteger('DiscoveryBatchSize', 50);
+        $this->RegisterPropertyString('SelectedImportKeys', '');
 
         $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
     }
@@ -59,83 +67,35 @@ class BayrolPoolManager5 extends IPSModule
     {
         return json_encode([
             'elements' => [
-                [
-                    'type' => 'ValidationTextBox',
-                    'name' => 'Host',
-                    'caption' => 'PoolManager IP / Host'
-                ],
-                [
-                    'type' => 'NumberSpinner',
-                    'name' => 'Port',
-                    'caption' => 'Port'
-                ],
-                [
-                    'type' => 'NumberSpinner',
-                    'name' => 'UpdateInterval',
-                    'caption' => 'Aktualisierungsintervall in Sekunden'
-                ],
-                [
-                    'type' => 'NumberSpinner',
-                    'name' => 'Timeout',
-                    'caption' => 'HTTP Timeout in Sekunden'
-                ],
-                [
-                    'type' => 'CheckBox',
-                    'name' => 'DebugMode',
-                    'caption' => 'Erweiterte Debug-Ausgaben'
-                ],
-                [
-                    'type' => 'Label',
-                    'caption' => 'Explorer: Nur lesende JSON-POST get-Abfragen. Keine Schreib-/Aktorbefehle.'
-                ],
-                [
-                    'type' => 'TextBox',
-                    'name' => 'ExplorerKeys',
-                    'caption' => 'Explorer API-Keys, ein Key pro Zeile'
-                ]
+                ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'PoolManager IP / Host'],
+                ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
+                ['type' => 'NumberSpinner', 'name' => 'UpdateInterval', 'caption' => 'Aktualisierungsintervall in Sekunden'],
+                ['type' => 'NumberSpinner', 'name' => 'Timeout', 'caption' => 'HTTP Timeout in Sekunden'],
+                ['type' => 'CheckBox', 'name' => 'DebugMode', 'caption' => 'Erweiterte Debug-Ausgaben'],
+                ['type' => 'Label', 'caption' => 'Explorer: Nur lesende JSON-POST get-Abfragen. Keine Schreib-/Aktorbefehle.'],
+                ['type' => 'TextBox', 'name' => 'ExplorerKeys', 'caption' => 'Explorer API-Keys, ein Key pro Zeile'],
+                ['type' => 'Label', 'caption' => 'Discovery-Assistent: findet Datenpunkte, legt aber keine gefundenen Datenpunkte automatisch im Objektbaum an.'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryGroupStart', 'caption' => 'Discovery Gruppe von'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryGroupEnd', 'caption' => 'Discovery Gruppe bis'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryObjectStart', 'caption' => 'Discovery Objekt-ID von'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryObjectEnd', 'caption' => 'Discovery Objekt-ID bis'],
+                ['type' => 'TextBox', 'name' => 'DiscoverySuffixes', 'caption' => 'Discovery Suffixe, ein Suffix pro Zeile'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryMaxKeys', 'caption' => 'Maximale Discovery-Keys pro Lauf'],
+                ['type' => 'NumberSpinner', 'name' => 'DiscoveryBatchSize', 'caption' => 'Discovery Batchgroesse'],
+                ['type' => 'TextBox', 'name' => 'SelectedImportKeys', 'caption' => 'Ausgewaehlte Keys fuer spaeteren Import, ein Key pro Zeile']
             ],
             'actions' => [
-                [
-                    'type' => 'Button',
-                    'caption' => 'Verbindung testen',
-                    'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'
-                ],
-                [
-                    'type' => 'Button',
-                    'caption' => 'Werte jetzt aktualisieren',
-                    'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'
-                ],
-                [
-                    'type' => 'Button',
-                    'caption' => 'Explorer jetzt ausfuehren',
-                    'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'
-                ],
-                [
-                    'type' => 'Label',
-                    'caption' => 'Version 0.1.0-alpha: Lesender Zugriff auf bekannte PM5 API-Datenpunkte plus sicherer Explorer-Modus.'
-                ]
+                ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'],
+                ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'],
+                ['type' => 'Button', 'caption' => 'Explorer jetzt ausfuehren', 'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'],
+                ['type' => 'Button', 'caption' => 'Discovery-Assistent ausfuehren', 'onClick' => 'BPM_RunDiscovery($id); echo "Discovery ausgefuehrt. Es wurden keine Datenpunkte automatisch angelegt. Ergebnis siehe Discovery Ergebnis.";'],
+                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer und sicherer Discovery-Assistent ohne Auto-Import.']
             ],
             'status' => [
-                [
-                    'code' => self::STATUS_ACTIVE,
-                    'icon' => 'active',
-                    'caption' => 'Aktiv'
-                ],
-                [
-                    'code' => self::STATUS_INACTIVE,
-                    'icon' => 'inactive',
-                    'caption' => 'Inaktiv / noch nicht aktualisiert'
-                ],
-                [
-                    'code' => self::STATUS_HOST_MISSING,
-                    'icon' => 'error',
-                    'caption' => 'Keine Host-Adresse konfiguriert'
-                ],
-                [
-                    'code' => self::STATUS_API_ERROR,
-                    'icon' => 'error',
-                    'caption' => 'PoolManager nicht erreichbar oder API-Fehler'
-                ]
+                ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'Aktiv'],
+                ['code' => self::STATUS_INACTIVE, 'icon' => 'inactive', 'caption' => 'Inaktiv / noch nicht aktualisiert'],
+                ['code' => self::STATUS_HOST_MISSING, 'icon' => 'error', 'caption' => 'Keine Host-Adresse konfiguriert'],
+                ['code' => self::STATUS_API_ERROR, 'icon' => 'error', 'caption' => 'PoolManager nicht erreichbar oder API-Fehler']
             ]
         ]);
     }
@@ -230,6 +190,76 @@ class BayrolPoolManager5 extends IPSModule
         }
     }
 
+    public function RunDiscovery(): void
+    {
+        $keys = $this->BuildDiscoveryKeys();
+        $generated = count($keys);
+        $this->SetValueSafe('DiscoveryGeneratedKeys', $generated);
+        $this->SetValueSafe('DiscoveryLastRun', date('Y-m-d H:i:s'));
+
+        if ($generated === 0) {
+            $this->SetValueSafe('DiscoveryResult', 'Keine Discovery-Keys generiert.');
+            $this->SetValueSafe('DiscoveryFoundDataPoints', 0);
+            return;
+        }
+
+        $batchSize = max(1, min(100, $this->ReadPropertyInteger('DiscoveryBatchSize')));
+        $chunks = array_chunk($keys, $batchSize);
+        $found = [];
+        $totalDuration = 0;
+
+        try {
+            foreach ($chunks as $index => $chunk) {
+                $this->SendDebugMessage('Discovery batch', ($index + 1) . '/' . count($chunks) . ' with ' . count($chunk) . ' keys');
+                $response = $this->ApiGet($chunk);
+                $data = $response['data'] ?? [];
+                $totalDuration += (int)($response['_meta']['duration_ms'] ?? 0);
+
+                if (!is_array($data)) {
+                    continue;
+                }
+
+                foreach ($data as $key => $value) {
+                    if ($value === null || $value === '') {
+                        continue;
+                    }
+                    $clean = $this->CleanString((string)$value);
+                    if ($clean === '') {
+                        continue;
+                    }
+                    $found[$key] = [
+                        'value' => $clean,
+                        'type' => $this->DetectValueType($clean),
+                        'selected' => false
+                    ];
+                }
+            }
+
+            ksort($found);
+            $output = [
+                'note' => 'Discovery ist rein lesend. Gefundene Datenpunkte werden nicht automatisch im Objektbaum angelegt.',
+                'next_step' => 'Gewuenschte Keys in SelectedImportKeys uebernehmen. Importfunktion folgt nach Testfreigabe.',
+                'generated_keys' => $generated,
+                'found_count' => count($found),
+                'found' => $found
+            ];
+            $raw = json_encode($output, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($raw === false) {
+                $raw = 'Discovery JSON encoding failed';
+            }
+
+            $this->SetValueSafe('DiscoveryResult', $raw);
+            $this->SetValueSafe('DiscoveryFoundDataPoints', count($found));
+            $this->SetValueSafe('DiscoveryResponseTimeMs', $totalDuration);
+            $this->SetValueSafe('ConnectionState', true);
+            $this->SetValueSafe('LastError', '');
+            $this->SetStatus(self::STATUS_ACTIVE);
+        } catch (Throwable $e) {
+            $this->SetValueSafe('DiscoveryResult', 'Discovery error: ' . $e->getMessage());
+            $this->HandleError('Discovery', $e);
+        }
+    }
+
     private function RegisterVariables(): void
     {
         $this->RegisterVariableFloat('pH', 'pH', 'BPM.pH', 10);
@@ -258,6 +288,12 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterVariableInteger('ExplorerDataPoints', 'Explorer Datenpunkte', '', 301);
         $this->RegisterVariableInteger('ExplorerResponseTimeMs', 'Explorer Antwortzeit', 'BPM.Milliseconds', 302);
         $this->RegisterVariableString('ExplorerLastRun', 'Explorer letzter Lauf', '', 303);
+
+        $this->RegisterVariableString('DiscoveryResult', 'Discovery Ergebnis', '', 400);
+        $this->RegisterVariableInteger('DiscoveryGeneratedKeys', 'Discovery generierte Keys', '', 401);
+        $this->RegisterVariableInteger('DiscoveryFoundDataPoints', 'Discovery gefundene Datenpunkte', '', 402);
+        $this->RegisterVariableInteger('DiscoveryResponseTimeMs', 'Discovery Antwortzeit gesamt', 'BPM.Milliseconds', 403);
+        $this->RegisterVariableString('DiscoveryLastRun', 'Discovery letzter Lauf', '', 404);
     }
 
     private function CreateProfiles(): void
@@ -403,9 +439,59 @@ class BayrolPoolManager5 extends IPSModule
         return $json;
     }
 
+    private function BuildDiscoveryKeys(): array
+    {
+        $groupStart = max(1, $this->ReadPropertyInteger('DiscoveryGroupStart'));
+        $groupEnd = max($groupStart, $this->ReadPropertyInteger('DiscoveryGroupEnd'));
+        $objectStart = max(1, $this->ReadPropertyInteger('DiscoveryObjectStart'));
+        $objectEnd = max($objectStart, $this->ReadPropertyInteger('DiscoveryObjectEnd'));
+        $maxKeys = max(1, min(5000, $this->ReadPropertyInteger('DiscoveryMaxKeys')));
+        $suffixes = $this->GetDiscoverySuffixes();
+        $keys = [];
+
+        foreach (range($groupStart, $groupEnd) as $group) {
+            foreach (range($objectStart, $objectEnd) as $object) {
+                foreach ($suffixes as $suffix) {
+                    $keys[] = $group . '.' . $object . '.' . $suffix;
+                    if (count($keys) >= $maxKeys) {
+                        return $keys;
+                    }
+                }
+            }
+        }
+
+        return $keys;
+    }
+
     private function GetExplorerKeys(): array
     {
-        $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $this->ReadPropertyString('ExplorerKeys'));
+        return $this->ParseKeyList($this->ReadPropertyString('ExplorerKeys'));
+    }
+
+    private function GetDiscoverySuffixes(): array
+    {
+        $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $this->ReadPropertyString('DiscoverySuffixes'));
+        $lines = explode("\n", $raw);
+        $suffixes = [];
+
+        foreach ($lines as $line) {
+            $suffix = trim($line);
+            if ($suffix === '' || strpos($suffix, '#') === 0 || strpos($suffix, '//') === 0) {
+                continue;
+            }
+            if (!preg_match('/^[A-Za-z0-9_]+$/', $suffix)) {
+                $this->SendDebugMessage('Discovery skipped invalid suffix', $suffix);
+                continue;
+            }
+            $suffixes[$suffix] = $suffix;
+        }
+
+        return array_values($suffixes ?: ['value']);
+    }
+
+    private function ParseKeyList(string $rawKeys): array
+    {
+        $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $rawKeys);
         $lines = explode("\n", $raw);
         $keys = [];
 
@@ -415,13 +501,25 @@ class BayrolPoolManager5 extends IPSModule
                 continue;
             }
             if (!preg_match('/^[0-9]+\.[0-9]+\.[A-Za-z0-9_]+$/', $key)) {
-                $this->SendDebugMessage('Explorer skipped invalid key', $key);
+                $this->SendDebugMessage('Skipped invalid key', $key);
                 continue;
             }
             $keys[$key] = $key;
         }
 
         return array_values($keys);
+    }
+
+    private function DetectValueType(string $value): string
+    {
+        $normalized = str_replace(',', '.', $value);
+        if (is_numeric($normalized)) {
+            return strpos($normalized, '.') === false ? 'integer' : 'float';
+        }
+        if ($value === '0' || $value === '1') {
+            return 'boolean-candidate';
+        }
+        return 'string';
     }
 
     private function ExtractHttpCode(array $headers): int
