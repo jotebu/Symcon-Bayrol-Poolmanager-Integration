@@ -1,13 +1,28 @@
 <?php
 
+declare(strict_types=1);
+
 class BayrolPoolManager extends IPSModule
 {
+    private const TIMER_UPDATE = 'UpdateTimer';
+
     private const STATUS_ACTIVE = 102;
     private const STATUS_INACTIVE = 104;
-    private const STATUS_CONFIG_ERROR = 200;
-    private const STATUS_CONNECTION_ERROR = 201;
-    private const STATUS_LOGIN_ERROR = 202;
-    private const STATUS_API_ERROR = 203;
+    private const STATUS_HOST_MISSING = 201;
+    private const STATUS_API_ERROR = 202;
+
+    private const API_KEYS = [
+        'pH' => '34.4001.value',
+        'Redox' => '34.4022.value',
+        'PoolTemperature' => '34.4033.value',
+        'OutdoorTemperatureText' => '13.16507.text2',
+        'ConductivityText' => '13.16509.text1',
+        'PoolLightStatus' => '55.17102.status',
+        'PoolLightText' => '55.17102.value',
+        'FilterPumpStatus' => '55.17106.status',
+        'FilterPumpOpmode' => '55.17106.opmode',
+        'FilterPumpText' => '55.17106.value'
+    ];
 
     public function Create()
     {
@@ -15,227 +30,394 @@ class BayrolPoolManager extends IPSModule
 
         $this->RegisterPropertyString('Host', '192.168.55.23');
         $this->RegisterPropertyInteger('Port', 80);
-        $this->RegisterPropertyString('Username', '');
-        $this->RegisterPropertyString('Password', '');
-        $this->RegisterPropertyInteger('PollInterval', 30);
+        $this->RegisterPropertyInteger('UpdateInterval', 60);
+        $this->RegisterPropertyInteger('Timeout', 10);
+        $this->RegisterPropertyBoolean('DebugMode', false);
 
-        $this->SetBuffer('SID', '');
-        $this->RegisterTimer('UpdateTimer', 0, 'BPM_Update($_IPS["TARGET"]);');
+        $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges()
     {
         parent::ApplyChanges();
 
+        $this->CreateProfiles();
         $this->RegisterVariables();
+        $this->UpdateTimer();
 
-        if (!$this->HasBasicConfiguration()) {
-            $this->SetTimerInterval('UpdateTimer', 0);
-            $this->SetStatus(self::STATUS_CONFIG_ERROR);
+        if (trim($this->ReadPropertyString('Host')) === '') {
+            $this->SetStatus(self::STATUS_HOST_MISSING);
             return;
         }
 
-        $interval = $this->ReadPropertyInteger('PollInterval');
-        $this->SetTimerInterval('UpdateTimer', max(5, $interval) * 1000);
         $this->SetStatus(self::STATUS_INACTIVE);
     }
 
-    public function TestConnection()
+    public function GetConfigurationForm()
     {
-        if (!$this->HasBasicConfiguration()) {
-            $this->SetStatus(self::STATUS_CONFIG_ERROR);
-            throw new Exception('Bitte Host, Benutzername und Passwort/PIN konfigurieren.');
-        }
-
-        $this->Login(true);
-        $this->Update();
-        return true;
-    }
-
-    public function Update()
-    {
-        if (!$this->HasBasicConfiguration()) {
-            $this->SetStatus(self::STATUS_CONFIG_ERROR);
-            return;
-        }
-
-        $keys = $this->GetDefaultKeys();
-        $response = $this->Request(['get' => $keys]);
-
-        if (!$this->IsStatusOk($response)) {
-            $this->SendDebug('Update', 'Session ungueltig oder API-Fehler. Neuer Login wird versucht.', 0);
-            $this->Login(true);
-            $response = $this->Request(['get' => $keys]);
-        }
-
-        if (!$this->IsStatusOk($response)) {
-            $this->SetStatus(self::STATUS_API_ERROR);
-            throw new Exception('PoolManager API Fehler: ' . json_encode($response));
-        }
-
-        $data = $response['data'] ?? [];
-
-        $this->SetFloatValue('PH', $data['34.4001.value'] ?? null);
-        $this->SetFloatValue('Redox', $data['34.4022.value'] ?? null);
-        $this->SetFloatValue('Temperature', $data['34.4033.value'] ?? null);
-        $this->SetStringValue('Status1', $this->CleanText($data['15.16701.value'] ?? ''));
-        $this->SetStringValue('Status2', $this->CleanText($data['15.16704.value'] ?? ''));
-        $this->SetStringValue('Status3', $this->CleanText($data['15.16705.value'] ?? ''));
-        $this->SetIntegerValue('FilterPumpStatus', $data['55.17106.status'] ?? null);
-        $this->SetStringValue('FilterPumpText', $this->CleanText($data['55.17106.value'] ?? ''));
-
-        $this->SetStatus(self::STATUS_ACTIVE);
-    }
-
-    private function RegisterVariables()
-    {
-        $this->RegisterVariableFloat('PH', 'pH', '', 10);
-        $this->RegisterVariableFloat('Redox', 'Redox', '', 20);
-        $this->RegisterVariableFloat('Temperature', 'Temperatur', '~Temperature', 30);
-        $this->RegisterVariableString('Status1', 'Status 1', '', 40);
-        $this->RegisterVariableString('Status2', 'Status 2', '', 50);
-        $this->RegisterVariableString('Status3', 'Status 3', '', 60);
-        $this->RegisterVariableInteger('FilterPumpStatus', 'Filterpumpe Status', '', 70);
-        $this->RegisterVariableString('FilterPumpText', 'Filterpumpe Text', '', 80);
-    }
-
-    private function GetDefaultKeys()
-    {
-        return [
-            '34.4001.value',  // pH
-            '34.4022.value',  // Redox mV
-            '34.4033.value',  // Temperatur
-            '15.16701.value', // Status 1
-            '15.16704.value', // Status 2
-            '15.16705.value', // Status 3
-            '55.17106.status',
-            '55.17106.value'
-        ];
-    }
-
-    private function Login(bool $force = false)
-    {
-        $sid = $this->GetBuffer('SID');
-        if (!$force && $sid !== '') {
-            return $sid;
-        }
-
-        $sid = $this->GenerateSessionId();
-        $this->SetBuffer('SID', $sid);
-
-        $payload = [
-            'set' => [
-                '9.17401.user' => $this->ReadPropertyString('Username'),
-                '9.17401.pass' => $this->ReadPropertyString('Password')
+        return json_encode([
+            'elements' => [
+                [
+                    'type' => 'ValidationTextBox',
+                    'name' => 'Host',
+                    'caption' => 'PoolManager IP / Host'
+                ],
+                [
+                    'type' => 'NumberSpinner',
+                    'name' => 'Port',
+                    'caption' => 'Port'
+                ],
+                [
+                    'type' => 'NumberSpinner',
+                    'name' => 'UpdateInterval',
+                    'caption' => 'Aktualisierungsintervall in Sekunden'
+                ],
+                [
+                    'type' => 'NumberSpinner',
+                    'name' => 'Timeout',
+                    'caption' => 'HTTP Timeout in Sekunden'
+                ],
+                [
+                    'type' => 'CheckBox',
+                    'name' => 'DebugMode',
+                    'caption' => 'Erweiterte Debug-Ausgaben'
+                ]
+            ],
+            'actions' => [
+                [
+                    'type' => 'Button',
+                    'caption' => 'Verbindung testen',
+                    'onClick' => 'BPM_TestConnection($id);'
+                ],
+                [
+                    'type' => 'Button',
+                    'caption' => 'Werte jetzt aktualisieren',
+                    'onClick' => 'BPM_UpdateValues($id);'
+                ],
+                [
+                    'type' => 'Label',
+                    'caption' => 'Version 0.1.0: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
+                ]
+            ],
+            'status' => [
+                [
+                    'code' => self::STATUS_ACTIVE,
+                    'icon' => 'active',
+                    'caption' => 'Aktiv'
+                ],
+                [
+                    'code' => self::STATUS_INACTIVE,
+                    'icon' => 'inactive',
+                    'caption' => 'Inaktiv / noch nicht aktualisiert'
+                ],
+                [
+                    'code' => self::STATUS_HOST_MISSING,
+                    'icon' => 'error',
+                    'caption' => 'Keine Host-Adresse konfiguriert'
+                ],
+                [
+                    'code' => self::STATUS_API_ERROR,
+                    'icon' => 'error',
+                    'caption' => 'PoolManager nicht erreichbar oder API-Fehler'
+                ]
             ]
-        ];
-
-        $response = $this->PostJson($sid, $payload);
-        $this->SendDebug('Login response', json_encode($response), 0);
-
-        if (!$this->IsStatusOk($response)) {
-            $this->SetStatus(self::STATUS_LOGIN_ERROR);
-            $this->SetBuffer('SID', '');
-            throw new Exception('Login am PoolManager fehlgeschlagen: ' . json_encode($response));
-        }
-
-        return $sid;
+        ]);
     }
 
-    private function Request(array $payload)
+    public function TestConnection(): bool
     {
-        $sid = $this->Login(false);
-        return $this->PostJson($sid, $payload);
+        $this->SendDebugMessage('TestConnection', 'Start');
+
+        try {
+            $response = $this->ApiGet(['34.4001.value']);
+            $ok = isset($response['data']['34.4001.value']);
+
+            $this->SetValue('ConnectionState', $ok);
+            $this->SetValue('LastApiStatus', (int)($response['status']['code'] ?? -1));
+            $this->SetValue('LastError', $ok ? '' : 'API response does not contain pH key');
+            $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
+            $this->SetStatus($ok ? self::STATUS_ACTIVE : self::STATUS_API_ERROR);
+
+            return $ok;
+        } catch (Throwable $e) {
+            $this->HandleError('TestConnection', $e);
+            return false;
+        }
     }
 
-    private function PostJson(string $sid, array $payload)
+    public function UpdateValues(): void
     {
-        $url = $this->BuildUrl($sid);
-        $body = json_encode($payload);
+        $keys = array_values(self::API_KEYS);
+        $this->SendDebugMessage('UpdateValues', 'Reading ' . count($keys) . ' keys');
 
-        $options = [
-            'http' => [
-                'method' => 'POST',
-                'header' => "Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n",
-                'content' => $body,
-                'timeout' => 5,
-                'ignore_errors' => true
-            ]
-        ];
+        try {
+            $response = $this->ApiGet($keys);
+            $data = $response['data'] ?? [];
 
-        $this->SendDebug('POST ' . $url, $body, 0);
+            if (!is_array($data)) {
+                throw new Exception('Invalid API data block');
+            }
 
-        $context = stream_context_create($options);
-        $raw = @file_get_contents($url, false, $context);
+            $this->SetValue('ConnectionState', true);
+            $this->SetValue('LastApiStatus', (int)($response['status']['code'] ?? 0));
+            $this->SetValue('LastError', '');
+            $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
 
-        if ($raw === false) {
-            $this->SetStatus(self::STATUS_CONNECTION_ERROR);
-            throw new Exception('Keine Antwort vom PoolManager unter ' . $url);
+            $this->UpdateKnownVariables($data);
+            $this->SetStatus(self::STATUS_ACTIVE);
+        } catch (Throwable $e) {
+            $this->HandleError('UpdateValues', $e);
         }
-
-        $this->SendDebug('Raw response', $raw, 0);
-
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            $this->SetStatus(self::STATUS_API_ERROR);
-            throw new Exception('Antwort ist kein gueltiges JSON: ' . $raw);
-        }
-
-        return $decoded;
     }
 
-    private function BuildUrl(string $sid)
+    private function RegisterVariables(): void
+    {
+        $this->RegisterVariableFloat('pH', 'pH', 'BPM.pH', 10);
+        $this->RegisterVariableInteger('Redox', 'Redox', 'BPM.Redox', 20);
+        $this->RegisterVariableFloat('PoolTemperature', 'Pooltemperatur', '~Temperature', 30);
+        $this->RegisterVariableFloat('OutdoorTemperature', 'Aussentemperatur T3', '~Temperature', 40);
+        $this->RegisterVariableFloat('Conductivity', 'Leitfaehigkeit', 'BPM.Conductivity', 50);
+
+        $this->RegisterVariableBoolean('PoolLightActive', 'Lampen Becken aktiv', '~Switch', 100);
+        $this->RegisterVariableString('PoolLightText', 'Lampen Becken Text', '', 101);
+
+        $this->RegisterVariableBoolean('FilterPumpActive', 'Filterpumpe aktiv', '~Switch', 110);
+        $this->RegisterVariableInteger('FilterPumpOpmode', 'Filterpumpe Betriebsart', 'BPM.FilterOpmode', 111);
+        $this->RegisterVariableString('FilterPumpText', 'Filterpumpe Text', '', 112);
+        $this->RegisterVariableString('FilterPumpDetailedMode', 'Filterpumpe Detailmodus', '', 113);
+
+        $this->RegisterVariableBoolean('ConnectionState', 'Verbindung aktiv', '~Switch', 200);
+        $this->RegisterVariableString('LastUpdate', 'Letzte Aktualisierung', '', 201);
+        $this->RegisterVariableInteger('LastApiStatus', 'Letzter API Status', '', 202);
+        $this->RegisterVariableString('LastError', 'Letzter Fehler', '', 203);
+    }
+
+    private function CreateProfiles(): void
+    {
+        $this->CreateFloatProfile('BPM.pH', 'Intensity', '', '', 0, 14, 0.01, 2);
+        $this->CreateIntegerProfile('BPM.Redox', 'Electricity', '', ' mV', 0, 1000, 1);
+        $this->CreateFloatProfile('BPM.Conductivity', 'Electricity', '', ' mS/cm', 0, 20, 0.1, 1);
+
+        if (!IPS_VariableProfileExists('BPM.FilterOpmode')) {
+            IPS_CreateVariableProfile('BPM.FilterOpmode', VARIABLETYPE_INTEGER);
+            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 0, 'Auto', '', -1);
+            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 1, 'Manuell', '', -1);
+            IPS_SetVariableProfileAssociation('BPM.FilterOpmode', 2, 'Aus', '', -1);
+        }
+    }
+
+    private function CreateFloatProfile(string $name, string $icon, string $prefix, string $suffix, float $min, float $max, float $step, int $digits): void
+    {
+        if (!IPS_VariableProfileExists($name)) {
+            IPS_CreateVariableProfile($name, VARIABLETYPE_FLOAT);
+        }
+        IPS_SetVariableProfileIcon($name, $icon);
+        IPS_SetVariableProfileText($name, $prefix, $suffix);
+        IPS_SetVariableProfileDigits($name, $digits);
+        IPS_SetVariableProfileValues($name, $min, $max, $step);
+    }
+
+    private function CreateIntegerProfile(string $name, string $icon, string $prefix, string $suffix, int $min, int $max, int $step): void
+    {
+        if (!IPS_VariableProfileExists($name)) {
+            IPS_CreateVariableProfile($name, VARIABLETYPE_INTEGER);
+        }
+        IPS_SetVariableProfileIcon($name, $icon);
+        IPS_SetVariableProfileText($name, $prefix, $suffix);
+        IPS_SetVariableProfileValues($name, $min, $max, $step);
+    }
+
+    private function UpdateKnownVariables(array $data): void
+    {
+        $this->SetFloatFromKey('pH', $data, self::API_KEYS['pH']);
+        $this->SetIntegerFromKey('Redox', $data, self::API_KEYS['Redox']);
+        $this->SetFloatFromKey('PoolTemperature', $data, self::API_KEYS['PoolTemperature']);
+
+        $outdoorText = $this->CleanString((string)($data[self::API_KEYS['OutdoorTemperatureText']] ?? ''));
+        $outdoor = $this->ExtractFirstNumber($outdoorText);
+        if ($outdoor !== null) {
+            $this->SetValue('OutdoorTemperature', $outdoor);
+        }
+
+        $conductivityText = $this->CleanString((string)($data[self::API_KEYS['ConductivityText']] ?? ''));
+        $conductivity = $this->ExtractFirstNumber($conductivityText);
+        if ($conductivity !== null) {
+            $this->SetValue('Conductivity', $conductivity);
+        }
+
+        $lightStatus = $this->GetIntValue($data, self::API_KEYS['PoolLightStatus']);
+        if ($lightStatus !== null) {
+            $this->SetValue('PoolLightActive', $lightStatus === 0);
+        }
+        $this->SetValue('PoolLightText', $this->CleanString((string)($data[self::API_KEYS['PoolLightText']] ?? '')));
+
+        $filterStatus = $this->GetIntValue($data, self::API_KEYS['FilterPumpStatus']);
+        if ($filterStatus !== null) {
+            $this->SetValue('FilterPumpActive', $filterStatus === 0);
+        }
+
+        $filterOpmode = $this->GetIntValue($data, self::API_KEYS['FilterPumpOpmode']);
+        if ($filterOpmode !== null) {
+            $this->SetValue('FilterPumpOpmode', $filterOpmode);
+        }
+
+        $filterText = $this->CleanString((string)($data[self::API_KEYS['FilterPumpText']] ?? ''));
+        $this->SetValue('FilterPumpText', $filterText);
+        $this->SetValue('FilterPumpDetailedMode', $this->ParseFilterDetailedMode($filterText));
+    }
+
+    private function ApiGet(array $keys): array
     {
         $host = trim($this->ReadPropertyString('Host'));
         $port = $this->ReadPropertyInteger('Port');
-        return 'http://' . $host . ':' . $port . '/cgi-bin/webgui.fcgi?sid=' . rawurlencode($sid);
-    }
+        $timeout = $this->ReadPropertyInteger('Timeout');
 
-    private function HasBasicConfiguration()
-    {
-        return trim($this->ReadPropertyString('Host')) !== ''
-            && trim($this->ReadPropertyString('Username')) !== ''
-            && $this->ReadPropertyString('Password') !== '';
-    }
-
-    private function IsStatusOk($response)
-    {
-        return is_array($response) && (($response['status']['code'] ?? null) === 0);
-    }
-
-    private function GenerateSessionId()
-    {
-        $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        $sid = '';
-        for ($i = 0; $i < 32; $i++) {
-            $sid .= $chars[random_int(0, strlen($chars) - 1)];
+        if ($host === '') {
+            throw new Exception('Host is empty');
         }
-        return $sid;
+
+        $sid = $this->CreateSid();
+        $url = 'http://' . $host . ':' . $port . '/cgi-bin/webgui.fcgi?sid=' . rawurlencode($sid);
+        $payload = json_encode(['get' => array_values($keys)]);
+
+        $this->SendDebugMessage('API URL', $url);
+        $this->SendDebugMessage('API Payload', (string)$payload);
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n",
+                'content' => $payload,
+                'timeout' => $timeout,
+                'ignore_errors' => true
+            ]
+        ]);
+
+        $raw = @file_get_contents($url, false, $context);
+        $headers = $http_response_header ?? [];
+        $httpCode = $this->ExtractHttpCode($headers);
+
+        if ($raw === false) {
+            throw new Exception('HTTP request failed');
+        }
+
+        $this->SendDebugMessage('HTTP Code', (string)$httpCode);
+        $this->SendDebugMessage('API Raw', (string)$raw);
+
+        if ($httpCode < 200 || $httpCode >= 300) {
+            throw new Exception('HTTP error ' . $httpCode);
+        }
+
+        $json = json_decode((string)$raw, true);
+        if (!is_array($json)) {
+            throw new Exception('Invalid JSON response');
+        }
+
+        $apiStatus = (int)($json['status']['code'] ?? -1);
+        if ($apiStatus !== 0) {
+            throw new Exception('API status code ' . $apiStatus);
+        }
+
+        return $json;
     }
 
-    private function CleanText($value)
+    private function ExtractHttpCode(array $headers): int
     {
-        return trim(html_entity_decode(strip_tags((string)$value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (isset($headers[0]) && preg_match('/HTTP\/\S+\s+(\d+)/', $headers[0], $match)) {
+            return (int)$match[1];
+        }
+        return 0;
     }
 
-    private function SetFloatValue(string $ident, $value)
+    private function CreateSid(): string
     {
-        if ($value === null || $value === '') {
+        return 'SYMBAYROL' . substr(strtoupper(md5((string)microtime(true) . random_int(0, PHP_INT_MAX))), 0, 23);
+    }
+
+    private function UpdateTimer(): void
+    {
+        $interval = $this->ReadPropertyInteger('UpdateInterval');
+        if ($interval < 5) {
+            $interval = 0;
+        }
+        $this->SetTimerInterval(self::TIMER_UPDATE, $interval * 1000);
+    }
+
+    private function SetFloatFromKey(string $ident, array $data, string $key): void
+    {
+        if (!array_key_exists($key, $data)) {
             return;
         }
-        SetValue($this->GetIDForIdent($ident), (float)str_replace(',', '.', (string)$value));
-    }
-
-    private function SetIntegerValue(string $ident, $value)
-    {
-        if ($value === null || $value === '') {
-            return;
+        $value = str_replace(',', '.', $this->CleanString((string)$data[$key]));
+        if (is_numeric($value)) {
+            $this->SetValue($ident, (float)$value);
         }
-        SetValue($this->GetIDForIdent($ident), (int)$value);
     }
 
-    private function SetStringValue(string $ident, string $value)
+    private function SetIntegerFromKey(string $ident, array $data, string $key): void
     {
-        SetValue($this->GetIDForIdent($ident), $value);
+        $value = $this->GetIntValue($data, $key);
+        if ($value !== null) {
+            $this->SetValue($ident, $value);
+        }
+    }
+
+    private function GetIntValue(array $data, string $key): ?int
+    {
+        if (!array_key_exists($key, $data)) {
+            return null;
+        }
+        $value = $this->CleanString((string)$data[$key]);
+        if ($value === '' || !is_numeric($value)) {
+            return null;
+        }
+        return (int)$value;
+    }
+
+    private function ExtractFirstNumber(string $text): ?float
+    {
+        $normalized = str_replace(',', '.', $text);
+        if (preg_match('/-?[0-9]+(?:\.[0-9]+)?/', $normalized, $match)) {
+            return (float)$match[0];
+        }
+        return null;
+    }
+
+    private function CleanString(string $value): string
+    {
+        return trim(html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    }
+
+    private function ParseFilterDetailedMode(string $text): string
+    {
+        if (stripos($text, 'Eco') !== false) {
+            return 'Eco';
+        }
+        if (stripos($text, 'Normal') !== false) {
+            return 'Normal';
+        }
+        if (stripos($text, 'erhoeht') !== false || stripos($text, 'erhöht') !== false || stripos($text, 'High') !== false) {
+            return 'High';
+        }
+        if ($text === 'Filterpumpe') {
+            return 'Auto/Aus';
+        }
+        return $text;
+    }
+
+    private function HandleError(string $context, Throwable $e): void
+    {
+        $this->SetValue('ConnectionState', false);
+        $this->SetValue('LastError', $e->getMessage());
+        $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
+        $this->SetStatus(self::STATUS_API_ERROR);
+        $this->SendDebugMessage($context . ' error', $e->getMessage());
+    }
+
+    private function SendDebugMessage(string $message, string $data): void
+    {
+        if ($this->ReadPropertyBoolean('DebugMode')) {
+            $this->SendDebug($message, $data, 0);
+        }
     }
 }
