@@ -5,10 +5,20 @@ declare(strict_types=1);
 class BayrolDiscovery extends IPSModule
 {
     private const STATUS_ACTIVE = 102;
-    private const STATUS_SQLITE_MISSING = 201;
-    private const STATUS_DATABASE_ERROR = 202;
+    private const STATUS_STORAGE_ERROR = 202;
     private const STATUS_API_ERROR = 203;
-    private const SCHEMA_VERSION = 3;
+    private const SCHEMA_VERSION = 1;
+
+    private const CSV_FILES = [
+        'meta' => ['key', 'value'],
+        'scans' => ['scan_id', 'started_at', 'finished_at', 'host', 'port', 'generated_keys', 'found_keys', 'duration_ms', 'notes'],
+        'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id'],
+        'observations' => ['scan_id', 'api_key', 'value', 'value_type', 'observed_at'],
+        'devices' => ['code', 'name', 'device_type', 'confidence', 'status_key', 'value_key', 'first_seen', 'last_seen'],
+        'device_keys' => ['device_code', 'api_key', 'role', 'is_required', 'direction'],
+        'tags' => ['name', 'color', 'description'],
+        'key_tags' => ['api_key', 'tag']
+    ];
 
     public function Create()
     {
@@ -26,12 +36,7 @@ class BayrolDiscovery extends IPSModule
         $this->RegisterPropertyInteger('ScanMaxKeys', 500);
         $this->RegisterPropertyInteger('ScanBatchSize', 50);
         $this->RegisterPropertyString('BrowserSearch', '');
-        $this->RegisterPropertyString('BrowserTypeFilter', '');
-        $this->RegisterPropertyInteger('BrowserMinConfidence', 0);
-        $this->RegisterPropertyBoolean('BrowserFavoritesOnly', false);
         $this->RegisterPropertyString('SelectedApiKey', '');
-        $this->RegisterPropertyString('DeviceSearch', '');
-        $this->RegisterPropertyString('DeviceTypeFilter', '');
         $this->RegisterPropertyString('SelectedDeviceCode', '');
     }
 
@@ -39,40 +44,30 @@ class BayrolDiscovery extends IPSModule
     {
         parent::ApplyChanges();
         $this->RegisterVariables();
-        if (!$this->IsSqliteAvailable()) {
-            $this->SetValueSafe('DatabaseReady', false);
-            $this->SetValueSafe('DatabaseStatus', 'PDO SQLite ist nicht verfuegbar. Bitte pdo_sqlite fuer die Symcon-PHP-Umgebung aktivieren.');
-            $this->SetStatus(self::STATUS_SQLITE_MISSING);
-            return;
-        }
         try {
-            $this->InitializeDatabase();
-            $this->SetValueSafe('DatabaseReady', true);
-            $this->SetValueSafe('DatabaseStatus', 'SQLite Datenbank bereit. Schema v' . self::SCHEMA_VERSION);
-            $this->SetValueSafe('DatabasePath', $this->GetDatabasePath());
-            $this->SetValueSafe('DatabaseSchemaVersion', self::SCHEMA_VERSION);
+            $this->InitializeStorage();
+            $this->SetValueSafe('StorageReady', true);
+            $this->SetValueSafe('StorageStatus', 'CSV Storage bereit. Schema v' . self::SCHEMA_VERSION);
+            $this->SetValueSafe('StoragePath', $this->GetStorageDirectory());
+            $this->SetValueSafe('StorageSchemaVersion', self::SCHEMA_VERSION);
             $this->SetStatus(self::STATUS_ACTIVE);
         } catch (Throwable $e) {
-            $this->SetValueSafe('DatabaseReady', false);
-            $this->SetValueSafe('DatabaseStatus', $e->getMessage());
-            $this->SetStatus(self::STATUS_DATABASE_ERROR);
+            $this->SetValueSafe('StorageReady', false);
+            $this->SetValueSafe('StorageStatus', $e->getMessage());
+            $this->SetStatus(self::STATUS_STORAGE_ERROR);
         }
     }
 
     public function GetConfigurationForm()
     {
-        $sqliteHint = $this->IsSqliteAvailable()
-            ? 'SQLite ist verfuegbar. Datenbankpfad: ' . $this->GetDatabasePath()
-            : 'PDO SQLite ist nicht verfuegbar. Die Konfigurationsform wird geladen, Scanner und Browser bleiben bis zur Aktivierung von pdo_sqlite deaktiviert.';
-
         return json_encode([
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'PoolManager IP / Host'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'NumberSpinner', 'name' => 'Timeout', 'caption' => 'HTTP Timeout in Sekunden'],
                 ['type' => 'CheckBox', 'name' => 'DebugMode', 'caption' => 'Erweiterte Debug-Ausgaben'],
-                ['type' => 'CheckBox', 'name' => 'KeepDatabaseOnDelete', 'caption' => 'Datenbank bei Instanzloeschung behalten'],
-                ['type' => 'Label', 'caption' => 'Scanner: rein lesende JSON-POST get-Abfragen. Keine Variablenanlage, keine Schreibbefehle.'],
+                ['type' => 'CheckBox', 'name' => 'KeepDatabaseOnDelete', 'caption' => 'CSV-Dateien bei Instanzloeschung behalten'],
+                ['type' => 'Label', 'caption' => 'CSV Storage: keine SQLite-/PDO-Abhaengigkeit. Dateien liegen im Symcon user/BayrolDiscovery Bereich.'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanGroupStart', 'caption' => 'Scan Gruppe von'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanGroupEnd', 'caption' => 'Scan Gruppe bis'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanObjectStart', 'caption' => 'Scan Objekt-ID von'],
@@ -80,36 +75,27 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'ScanSuffixes', 'caption' => 'Scan Suffixe, getrennt durch Semikolon oder Komma'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanMaxKeys', 'caption' => 'Maximale Keys pro Scan'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanBatchSize', 'caption' => 'Batchgroesse'],
-                ['type' => 'Label', 'caption' => 'API-Key Browser'],
-                ['type' => 'ValidationTextBox', 'name' => 'BrowserSearch', 'caption' => 'Suche API-Key, Name, Wert'],
-                ['type' => 'ValidationTextBox', 'name' => 'BrowserTypeFilter', 'caption' => 'Typfilter'],
-                ['type' => 'NumberSpinner', 'name' => 'BrowserMinConfidence', 'caption' => 'Minimales Vertrauen'],
-                ['type' => 'CheckBox', 'name' => 'BrowserFavoritesOnly', 'caption' => 'Nur Favoriten anzeigen'],
+                ['type' => 'ValidationTextBox', 'name' => 'BrowserSearch', 'caption' => 'Browser-Suche'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKey', 'caption' => 'Ausgewaehlter API-Key fuer Details/Favorit'],
-                ['type' => 'Label', 'caption' => 'Device Browser'],
-                ['type' => 'ValidationTextBox', 'name' => 'DeviceSearch', 'caption' => 'Device-Suche'],
-                ['type' => 'ValidationTextBox', 'name' => 'DeviceTypeFilter', 'caption' => 'Device-Typfilter'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Ausgewaehlter Device-Code fuer Details']
             ],
             'actions' => [
-                ['type' => 'Label', 'caption' => $sqliteHint],
-                ['type' => 'Button', 'caption' => 'Datenbank pruefen', 'onClick' => 'echo BPD_CheckDatabase($id);'],
+                ['type' => 'Label', 'caption' => 'CSV-Pfad: ' . $this->GetStorageDirectory()],
+                ['type' => 'Button', 'caption' => 'CSV Storage pruefen', 'onClick' => 'echo BPD_CheckDatabase($id);'],
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPD_TestConnection($id);'],
                 ['type' => 'Button', 'caption' => 'Scan starten', 'onClick' => 'echo BPD_RunScan($id);'],
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
-                ['type' => 'Button', 'caption' => 'Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
+                ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetails($id);'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavorite($id);'],
                 $this->GetApiKeyListDefinition(),
-                ['type' => 'Button', 'caption' => 'Devices neu berechnen', 'onClick' => 'echo BPD_RecalculateDevices($id);'],
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
                 ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetails($id);'],
                 $this->GetDeviceListDefinition()
             ],
             'status' => [
-                ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'SQLite Datenbank bereit'],
-                ['code' => self::STATUS_SQLITE_MISSING, 'icon' => 'error', 'caption' => 'PDO SQLite fehlt'],
-                ['code' => self::STATUS_DATABASE_ERROR, 'icon' => 'error', 'caption' => 'Datenbankfehler'],
+                ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'CSV Storage bereit'],
+                ['code' => self::STATUS_STORAGE_ERROR, 'icon' => 'error', 'caption' => 'CSV Storage Fehler'],
                 ['code' => self::STATUS_API_ERROR, 'icon' => 'error', 'caption' => 'PM5 API Fehler']
             ]
         ]);
@@ -117,26 +103,16 @@ class BayrolDiscovery extends IPSModule
 
     public function CheckDatabase(): string
     {
-        if (!$this->IsSqliteAvailable()) {
-            $this->SetStatus(self::STATUS_SQLITE_MISSING);
-            return 'Fehler: PDO SQLite ist nicht verfuegbar.';
-        }
         try {
-            $this->InitializeDatabase();
-            $pdo = $this->OpenDatabase();
-            $message = 'Datenbank OK. Tabellen: ' . (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")->fetchColumn()
-                . ', API-Keys: ' . (int)$pdo->query('SELECT COUNT(*) FROM api_keys')->fetchColumn()
-                . ', Scans: ' . (int)$pdo->query('SELECT COUNT(*) FROM scans')->fetchColumn()
-                . ', Tags: ' . (int)$pdo->query('SELECT COUNT(*) FROM tags')->fetchColumn()
-                . ', Devices: ' . (int)$pdo->query('SELECT COUNT(*) FROM devices')->fetchColumn()
-                . ', Schema: v' . self::SCHEMA_VERSION;
-            $this->SetValueSafe('DatabaseStatus', $message);
+            $this->InitializeStorage();
+            $message = 'CSV Storage OK. API-Keys: ' . count($this->ReadCsvAssoc('api_keys')) . ', Scans: ' . count($this->ReadCsvAssoc('scans')) . ', Observations: ' . count($this->ReadCsvAssoc('observations')) . ', Devices: ' . count($this->ReadCsvAssoc('devices'));
+            $this->SetValueSafe('StorageStatus', $message);
             $this->SetStatus(self::STATUS_ACTIVE);
             return $message;
         } catch (Throwable $e) {
-            $this->SetValueSafe('DatabaseStatus', $e->getMessage());
-            $this->SetStatus(self::STATUS_DATABASE_ERROR);
-            return 'Datenbankfehler: ' . $e->getMessage();
+            $this->SetValueSafe('StorageStatus', $e->getMessage());
+            $this->SetStatus(self::STATUS_STORAGE_ERROR);
+            return 'CSV-Fehler: ' . $e->getMessage();
         }
     }
 
@@ -160,35 +136,65 @@ class BayrolDiscovery extends IPSModule
 
     public function RunScan(): string
     {
-        if (!$this->IsSqliteAvailable()) {
-            $this->SetStatus(self::STATUS_SQLITE_MISSING);
-            return 'Scan nicht moeglich: PDO SQLite ist nicht verfuegbar.';
-        }
         try {
-            $this->InitializeDatabase();
+            $this->InitializeStorage();
             $keys = $this->BuildScanKeys();
-            $pdo = $this->OpenDatabase();
+            $scanId = $this->GetNextScanId();
             $started = date('Y-m-d H:i:s');
-            $scanId = $this->CreateScanRow($pdo, $started, count($keys));
-            $chunks = array_chunk($keys, max(1, min(100, $this->ReadPropertyInteger('ScanBatchSize'))));
             $found = 0;
             $duration = 0;
-            foreach ($chunks as $chunk) {
+            $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+            $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
+            $deviceKeys = $this->ReadCsvAssoc('device_keys');
+            $observationsToAppend = [];
+
+            foreach (array_chunk($keys, max(1, min(100, $this->ReadPropertyInteger('ScanBatchSize')))) as $chunk) {
                 $response = $this->ApiGet($chunk);
                 $duration += (int)($response['_meta']['duration_ms'] ?? 0);
                 foreach (($response['data'] ?? []) as $key => $value) {
                     $clean = $this->CleanString((string)$value);
-                    if ($clean === '') { continue; }
-                    $this->StoreObservation($pdo, $scanId, (string)$key, $clean, $started);
+                    if ($clean === '') {
+                        continue;
+                    }
+                    $type = $this->DetectValueType($clean);
+                    $confidence = (string)$this->GetConfidence((string)$key, $clean);
+                    $existing = $apiKeys[(string)$key] ?? [];
+                    $apiKeys[(string)$key] = [
+                        'api_key' => (string)$key,
+                        'current_value' => $clean,
+                        'value_type' => $type,
+                        'confidence' => $confidence,
+                        'suggested_name' => $existing['suggested_name'] ?? $this->GetKnownName((string)$key),
+                        'is_favorite' => $existing['is_favorite'] ?? '0',
+                        'first_seen' => $existing['first_seen'] ?? $started,
+                        'last_seen' => $started,
+                        'last_scan_id' => (string)$scanId
+                    ];
+                    $observationsToAppend[] = ['scan_id' => (string)$scanId, 'api_key' => (string)$key, 'value' => $clean, 'value_type' => $type, 'observed_at' => $started];
+                    $this->ClassifyDevice((string)$key, $started, $devices, $deviceKeys);
                     $found++;
                 }
             }
-            $finished = date('Y-m-d H:i:s');
-            $pdo->prepare('UPDATE scans SET finished_at=:finished, found_keys=:found, duration_ms=:duration WHERE id=:id')->execute([':finished' => $finished, ':found' => $found, ':duration' => $duration, ':id' => $scanId]);
-            $this->RecalculateAllDevices($pdo);
+
+            $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+            $this->AppendCsvAssoc('observations', $observationsToAppend);
+            $this->WriteCsvAssoc('devices', array_values($devices));
+            $this->WriteCsvAssoc('device_keys', $this->UniqueRows($deviceKeys, ['device_code', 'api_key']));
+            $this->AppendCsvAssoc('scans', [[
+                'scan_id' => (string)$scanId,
+                'started_at' => $started,
+                'finished_at' => date('Y-m-d H:i:s'),
+                'host' => $this->ReadPropertyString('Host'),
+                'port' => (string)$this->ReadPropertyInteger('Port'),
+                'generated_keys' => (string)count($keys),
+                'found_keys' => (string)$found,
+                'duration_ms' => (string)$duration,
+                'notes' => 'CSV scan'
+            ]]);
+
             $this->SetValueSafe('LastScanId', $scanId);
             $this->SetValueSafe('LastScanStarted', $started);
-            $this->SetValueSafe('LastScanFinished', $finished);
+            $this->SetValueSafe('LastScanFinished', date('Y-m-d H:i:s'));
             $this->SetValueSafe('LastScanGeneratedKeys', count($keys));
             $this->SetValueSafe('LastScanFoundKeys', $found);
             $this->SetValueSafe('LastResponseTimeMs', $duration);
@@ -206,96 +212,108 @@ class BayrolDiscovery extends IPSModule
 
     public function GetScanSummary(): string
     {
-        if (!$this->IsSqliteAvailable()) { return 'Keine Zusammenfassung: PDO SQLite ist nicht verfuegbar.'; }
         try {
-            $pdo = $this->OpenDatabase();
-            $message = 'Scans: ' . (int)$pdo->query('SELECT COUNT(*) FROM scans')->fetchColumn()
-                . ', API-Keys: ' . (int)$pdo->query('SELECT COUNT(*) FROM api_keys')->fetchColumn()
-                . ', Beobachtungen: ' . (int)$pdo->query('SELECT COUNT(*) FROM observations')->fetchColumn()
-                . ', Devices: ' . (int)$pdo->query('SELECT COUNT(*) FROM devices')->fetchColumn();
+            $message = 'Scans: ' . count($this->ReadCsvAssoc('scans')) . ', API-Keys: ' . count($this->ReadCsvAssoc('api_keys')) . ', Beobachtungen: ' . count($this->ReadCsvAssoc('observations')) . ', Devices: ' . count($this->ReadCsvAssoc('devices'));
             $this->SetValueSafe('ScanSummary', $message);
             return $message;
-        } catch (Throwable $e) { return 'Zusammenfassungsfehler: ' . $e->getMessage(); }
+        } catch (Throwable $e) {
+            return 'Zusammenfassungsfehler: ' . $e->getMessage();
+        }
     }
 
     public function LoadBrowser(): string
     {
-        if (!$this->IsSqliteAvailable()) { return 'Browser nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
         $rows = $this->BuildBrowserRows();
         $this->UpdateBrowserFormList($rows);
-        return 'Browser geladen. Angezeigte Zeilen: ' . count($rows);
+        return 'API-Key Browser geladen. Zeilen: ' . count($rows);
     }
 
     public function LoadDevices(): string
     {
-        if (!$this->IsSqliteAvailable()) { return 'Device Browser nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
         $rows = $this->BuildDeviceRows();
         $this->UpdateDeviceFormList($rows);
-        return 'Device Browser geladen. Angezeigte Devices: ' . count($rows);
-    }
-
-    public function RecalculateDevices(): string
-    {
-        if (!$this->IsSqliteAvailable()) { return 'Neuberechnung nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
-        try { $pdo = $this->OpenDatabase(); $this->RecalculateAllDevices($pdo); $this->UpdateDeviceFormList($this->BuildDeviceRows()); return 'Devices neu berechnet.'; } catch (Throwable $e) { return 'Device-Rechenfehler: ' . $e->getMessage(); }
-    }
-
-    public function LoadDeviceDetails(): string
-    {
-        if (!$this->IsSqliteAvailable()) { return 'Device Details nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
-        $code = trim($this->ReadPropertyString('SelectedDeviceCode'));
-        if ($code === '') { return 'Kein Device-Code ausgewaehlt.'; }
-        try {
-            $pdo = $this->OpenDatabase();
-            $stmt = $pdo->prepare('SELECT * FROM devices WHERE code=:code');
-            $stmt->execute([':code' => $code]);
-            $device = $stmt->fetch();
-            if (!is_array($device)) { return 'Device nicht gefunden: ' . $code; }
-            $keys = $pdo->prepare('SELECT dk.role, dk.is_required, dk.direction, k.api_key, k.current_value, k.value_type, k.confidence FROM device_keys dk INNER JOIN api_keys k ON k.api_key=dk.api_key WHERE dk.device_id=:id ORDER BY dk.is_required DESC, dk.role, k.api_key');
-            $keys->execute([':id' => (int)$device['id']]);
-            $lines = [];
-            foreach ($keys->fetchAll() as $row) { $lines[] = ($row['is_required'] ? 'Pflicht' : 'Optional') . ' | ' . $row['role'] . ' | ' . $row['api_key'] . ' | ' . $row['current_value'] . ' | ' . $row['value_type']; }
-            $detail = 'Device: ' . $device['name'] . "\nCode: " . $device['code'] . "\nTyp: " . ($device['device_type'] ?? '') . "\nKategorie: " . ($device['category'] ?? '') . "\nVertrauen: " . ($device['confidence'] ?? '') . "\nStatus-Key: " . ($device['status_key'] ?? '') . "\nValue-Key: " . ($device['value_key'] ?? '') . "\n\nKeys:\n" . implode("\n", $lines);
-            $this->SetValueSafe('SelectedDeviceDetails', $detail);
-            return $detail;
-        } catch (Throwable $e) { return 'Device-Detail-Fehler: ' . $e->getMessage(); }
+        return 'Device Browser geladen. Devices: ' . count($rows);
     }
 
     public function LoadApiKeyDetails(): string
     {
-        if (!$this->IsSqliteAvailable()) { return 'API-Key Details nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
         $key = trim($this->ReadPropertyString('SelectedApiKey'));
-        if ($key === '') { return 'Kein API-Key ausgewaehlt.'; }
-        try {
-            $pdo = $this->OpenDatabase();
-            $stmt = $pdo->prepare('SELECT * FROM api_keys WHERE api_key=:key');
-            $stmt->execute([':key' => $key]);
-            $row = $stmt->fetch();
-            if (!is_array($row)) { return 'API-Key nicht gefunden: ' . $key; }
-            $detail = 'API-Key: ' . $row['api_key'] . "\nName: " . ($row['suggested_name'] ?? '') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . ((int)$row['is_favorite'] === 1 ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '');
-            $this->SetValueSafe('SelectedApiKeyDetails', $detail);
-            return $detail;
-        } catch (Throwable $e) { return 'Detail-Fehler: ' . $e->getMessage(); }
+        if ($key === '') {
+            return 'Kein API-Key ausgewaehlt.';
+        }
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        if (!isset($apiKeys[$key])) {
+            return 'API-Key nicht gefunden: ' . $key;
+        }
+        $row = $apiKeys[$key];
+        $history = array_slice(array_reverse(array_values(array_filter($this->ReadCsvAssoc('observations'), fn($r) => ($r['api_key'] ?? '') === $key))), 0, 8);
+        $lines = [];
+        foreach ($history as $h) {
+            $lines[] = ($h['observed_at'] ?? '') . ' | ' . ($h['value'] ?? '') . ' | ' . ($h['value_type'] ?? '');
+        }
+        $detail = 'API-Key: ' . $key . "\nName: " . ($row['suggested_name'] ?? '') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
+        $this->SetValueSafe('SelectedApiKeyDetails', $detail);
+        return $detail;
+    }
+
+    public function LoadDeviceDetails(): string
+    {
+        $code = trim($this->ReadPropertyString('SelectedDeviceCode'));
+        if ($code === '') {
+            return 'Kein Device-Code ausgewaehlt.';
+        }
+        $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
+        if (!isset($devices[$code])) {
+            return 'Device nicht gefunden: ' . $code;
+        }
+        $keys = array_values(array_filter($this->ReadCsvAssoc('device_keys'), fn($r) => ($r['device_code'] ?? '') === $code));
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        $lines = [];
+        foreach ($keys as $k) {
+            $api = $apiKeys[$k['api_key']] ?? [];
+            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . ($k['api_key'] ?? '') . ' | ' . ($api['current_value'] ?? '') . ' | ' . ($api['value_type'] ?? '');
+        }
+        $d = $devices[$code];
+        $detail = 'Device: ' . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\nStatus-Key: " . ($d['status_key'] ?? '') . "\nValue-Key: " . ($d['value_key'] ?? '') . "\n\nKeys:\n" . implode("\n", $lines);
+        $this->SetValueSafe('SelectedDeviceDetails', $detail);
+        return $detail;
     }
 
     public function ToggleFavorite(): string
     {
-        if (!$this->IsSqliteAvailable()) { return 'Favorit nicht moeglich: PDO SQLite ist nicht verfuegbar.'; }
         $key = trim($this->ReadPropertyString('SelectedApiKey'));
-        if ($key === '') { return 'Kein API-Key ausgewaehlt.'; }
-        $pdo = $this->OpenDatabase();
-        $stmt = $pdo->prepare('UPDATE api_keys SET is_favorite = CASE WHEN is_favorite=1 THEN 0 ELSE 1 END WHERE api_key=:key');
-        $stmt->execute([':key' => $key]);
+        if ($key === '') {
+            return 'Kein API-Key ausgewaehlt.';
+        }
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        if (!isset($apiKeys[$key])) {
+            return 'API-Key nicht gefunden: ' . $key;
+        }
+        $apiKeys[$key]['is_favorite'] = (($apiKeys[$key]['is_favorite'] ?? '0') === '1') ? '0' : '1';
+        $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
         $this->UpdateBrowserFormList($this->BuildBrowserRows());
-        return $stmt->rowCount() === 0 ? 'API-Key nicht gefunden: ' . $key : 'Favorit umgeschaltet: ' . $key;
+        return 'Favorit umgeschaltet: ' . $key;
+    }
+
+    public function Destroy()
+    {
+        if (!$this->ReadPropertyBoolean('KeepDatabaseOnDelete')) {
+            $dir = $this->GetStorageDirectory();
+            if (is_dir($dir)) {
+                foreach (glob($dir . DIRECTORY_SEPARATOR . '*.csv') ?: [] as $file) {
+                    @unlink($file);
+                }
+            }
+        }
+        parent::Destroy();
     }
 
     private function RegisterVariables(): void
     {
-        $this->RegisterVariableBoolean('DatabaseReady', 'Datenbank bereit', '~Switch', 10);
-        $this->RegisterVariableString('DatabaseStatus', 'Datenbank Status', '', 20);
-        $this->RegisterVariableString('DatabasePath', 'Datenbank Pfad', '', 30);
-        $this->RegisterVariableInteger('DatabaseSchemaVersion', 'Datenbank Schema Version', '', 40);
+        $this->RegisterVariableBoolean('StorageReady', 'CSV Storage bereit', '~Switch', 10);
+        $this->RegisterVariableString('StorageStatus', 'CSV Storage Status', '', 20);
+        $this->RegisterVariableString('StoragePath', 'CSV Storage Pfad', '', 30);
+        $this->RegisterVariableInteger('StorageSchemaVersion', 'CSV Schema Version', '', 40);
         $this->RegisterVariableInteger('LastScanId', 'Letzte Scan-ID', '', 100);
         $this->RegisterVariableString('LastScanStarted', 'Letzter Scan Start', '', 110);
         $this->RegisterVariableString('LastScanFinished', 'Letzter Scan Ende', '', 120);
@@ -317,8 +335,7 @@ class BayrolDiscovery extends IPSModule
             ['name' => 'api_key', 'caption' => 'API-Key', 'width' => '200px', 'add' => '', 'edit' => false],
             ['name' => 'suggested_name', 'caption' => 'Name', 'width' => '160px', 'add' => '', 'edit' => false],
             ['name' => 'current_value', 'caption' => 'Wert', 'width' => '170px', 'add' => '', 'edit' => false],
-            ['name' => 'value_type', 'caption' => 'Typ', 'width' => '120px', 'add' => '', 'edit' => false],
-            ['name' => 'device', 'caption' => 'Device', 'width' => '130px', 'add' => '', 'edit' => false]
+            ['name' => 'value_type', 'caption' => 'Typ', 'width' => '120px', 'add' => '', 'edit' => false]
         ], 'values' => $this->BuildBrowserRowsSafe()];
     }
 
@@ -334,101 +351,122 @@ class BayrolDiscovery extends IPSModule
         ], 'values' => $this->BuildDeviceRowsSafe()];
     }
 
-    private function BuildBrowserRowsSafe(): array { try { return $this->IsSqliteAvailable() ? $this->BuildBrowserRows() : []; } catch (Throwable $e) { return []; } }
-    private function BuildDeviceRowsSafe(): array { try { return $this->IsSqliteAvailable() ? $this->BuildDeviceRows() : []; } catch (Throwable $e) { return []; } }
+    private function BuildBrowserRowsSafe(): array { try { return $this->BuildBrowserRows(); } catch (Throwable $e) { return []; } }
+    private function BuildDeviceRowsSafe(): array { try { return $this->BuildDeviceRows(); } catch (Throwable $e) { return []; } }
 
     private function BuildBrowserRows(): array
     {
-        $pdo = $this->OpenDatabase();
+        $search = mb_strtolower(trim($this->ReadPropertyString('BrowserSearch')));
         $rows = [];
-        $sql = 'SELECT k.*, d.name AS device_name FROM api_keys k LEFT JOIN device_keys dk ON dk.api_key=k.api_key LEFT JOIN devices d ON d.id=dk.device_id ORDER BY k.last_seen DESC LIMIT 200';
-        foreach ($pdo->query($sql)->fetchAll() as $row) {
-            $rows[] = ['favorite' => ((int)$row['is_favorite'] === 1) ? 'ja' : '', 'confidence' => (string)$row['confidence'], 'api_key' => (string)$row['api_key'], 'suggested_name' => (string)($row['suggested_name'] ?? ''), 'current_value' => (string)($row['current_value'] ?? ''), 'value_type' => (string)($row['value_type'] ?? ''), 'device' => (string)($row['device_name'] ?? '')];
+        foreach ($this->ReadCsvAssoc('api_keys') as $r) {
+            $haystack = mb_strtolower(($r['api_key'] ?? '') . ' ' . ($r['suggested_name'] ?? '') . ' ' . ($r['current_value'] ?? ''));
+            if ($search !== '' && strpos($haystack, $search) === false) { continue; }
+            $rows[] = ['favorite' => (($r['is_favorite'] ?? '0') === '1') ? 'ja' : '', 'confidence' => $r['confidence'] ?? '', 'api_key' => $r['api_key'] ?? '', 'suggested_name' => $r['suggested_name'] ?? '', 'current_value' => $r['current_value'] ?? '', 'value_type' => $r['value_type'] ?? ''];
         }
-        return $rows;
+        return array_slice(array_reverse($rows), 0, 200);
     }
 
     private function BuildDeviceRows(): array
     {
-        $pdo = $this->OpenDatabase();
+        $deviceKeys = $this->ReadCsvAssoc('device_keys');
+        $counts = [];
+        foreach ($deviceKeys as $dk) { $counts[$dk['device_code']] = ($counts[$dk['device_code']] ?? 0) + 1; }
         $rows = [];
-        $sql = 'SELECT d.*, COUNT(dk.api_key) AS key_count FROM devices d LEFT JOIN device_keys dk ON dk.device_id=d.id GROUP BY d.id ORDER BY d.confidence DESC, d.name ASC LIMIT 100';
-        foreach ($pdo->query($sql)->fetchAll() as $row) {
-            $rows[] = ['code' => (string)$row['code'], 'name' => (string)$row['name'], 'device_type' => (string)($row['device_type'] ?? ''), 'confidence' => (string)($row['confidence'] ?? 0), 'key_count' => (string)($row['key_count'] ?? 0), 'status_key' => (string)($row['status_key'] ?? '')];
+        foreach ($this->ReadCsvAssoc('devices') as $d) {
+            $rows[] = ['code' => $d['code'] ?? '', 'name' => $d['name'] ?? '', 'device_type' => $d['device_type'] ?? '', 'confidence' => $d['confidence'] ?? '', 'key_count' => (string)($counts[$d['code'] ?? ''] ?? 0), 'status_key' => $d['status_key'] ?? ''];
         }
         return $rows;
     }
 
-    private function UpdateBrowserFormList(array $rows): void { $this->UpdateFormField('BrowserList', 'values', json_encode($rows) ?: '[]'); }
-    private function UpdateDeviceFormList(array $rows): void { $this->UpdateFormField('DeviceList', 'values', json_encode($rows) ?: '[]'); }
+    private function UpdateBrowserFormList(array $rows): void { $this->UpdateFormField('BrowserList', 'values', json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'); }
+    private function UpdateDeviceFormList(array $rows): void { $this->UpdateFormField('DeviceList', 'values', json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'); }
 
-    private function CreateScanRow(PDO $pdo, string $started, int $generatedKeys): int
+    private function InitializeStorage(): void
     {
-        $pdo->prepare('INSERT INTO scans(started_at, host, port, generated_keys, notes) VALUES(:started, :host, :port, :generated, :notes)')->execute([':started' => $started, ':host' => $this->ReadPropertyString('Host'), ':port' => $this->ReadPropertyInteger('Port'), ':generated' => $generatedKeys, ':notes' => 'Scan']);
-        return (int)$pdo->lastInsertId();
-    }
-
-    private function StoreObservation(PDO $pdo, int $scanId, string $key, string $value, string $observedAt): void
-    {
-        $type = $this->DetectValueType($value); $confidence = $this->GetConfidence($key, $value); $name = $this->GetKnownName($key);
-        $pdo->prepare('INSERT INTO api_keys(api_key,current_value,value_type,confidence,suggested_name,first_seen,last_seen,last_scan_id) VALUES(:key,:value,:type,:confidence,:name,:first,:last,:scan) ON CONFLICT(api_key) DO UPDATE SET current_value=excluded.current_value,value_type=excluded.value_type,confidence=excluded.confidence,last_seen=excluded.last_seen,last_scan_id=excluded.last_scan_id')->execute([':key'=>$key, ':value'=>$value, ':type'=>$type, ':confidence'=>$confidence, ':name'=>$name, ':first'=>$observedAt, ':last'=>$observedAt, ':scan'=>$scanId]);
-        $pdo->prepare('INSERT INTO observations(scan_id, api_key, value, value_type, observed_at) VALUES(:scan, :key, :value, :type, :time)')->execute([':scan'=>$scanId, ':key'=>$key, ':value'=>$value, ':type'=>$type, ':time'=>$observedAt]);
-        $this->AutoClassifyKey($pdo, $key);
-    }
-
-    private function AutoClassifyKey(PDO $pdo, string $key): void
-    {
-        if (strpos($key, '55.17106.') === 0) { $this->EnsureDeviceForKey($pdo, 'filter_pump', 'Filterpumpe', 'actuator', $key, $this->GetKeySuffix($key)); }
-        if (strpos($key, '55.17102.') === 0) { $this->EnsureDeviceForKey($pdo, 'pool_light', 'Poollicht', 'actuator', $key, $this->GetKeySuffix($key)); }
-        if (strpos($key, '34.') === 0) { $this->EnsureDeviceForKey($pdo, 'water_values', 'Wasserwerte', 'sensor_group', $key, 'measurement'); }
-        if (strpos($key, '13.') === 0) { $this->EnsureDeviceForKey($pdo, 'system_values', 'Systemwerte', 'system_group', $key, 'info'); }
-    }
-
-    private function EnsureDeviceForKey(PDO $pdo, string $code, string $name, string $type, string $apiKey, string $role): void
-    {
-        $now = date('Y-m-d H:i:s');
-        $pdo->prepare('INSERT OR IGNORE INTO devices(code,name,device_type,first_seen,last_seen) VALUES(:code,:name,:type,:first,:last)')->execute([':code'=>$code, ':name'=>$name, ':type'=>$type, ':first'=>$now, ':last'=>$now]);
-        $deviceId = (int)$pdo->query('SELECT id FROM devices WHERE code=' . $pdo->quote($code))->fetchColumn();
-        $pdo->prepare('INSERT OR IGNORE INTO device_keys(device_id, api_key, role, is_required, direction) VALUES(:device,:key,:role,:required,:direction)')->execute([':device'=>$deviceId, ':key'=>$apiKey, ':role'=>$role, ':required'=>in_array($role, ['status','value','measurement'], true) ? 1 : 0, ':direction'=>'read']);
-        if ($role === 'status') { $pdo->prepare('UPDATE devices SET status_key=:key WHERE id=:id AND (status_key IS NULL OR status_key=\'\')')->execute([':key'=>$apiKey, ':id'=>$deviceId]); }
-        if ($role === 'value' || $role === 'measurement') { $pdo->prepare('UPDATE devices SET value_key=:key WHERE id=:id AND (value_key IS NULL OR value_key=\'\')')->execute([':key'=>$apiKey, ':id'=>$deviceId]); }
-    }
-
-    private function RecalculateAllDevices(PDO $pdo): void
-    {
-        foreach ($pdo->query('SELECT id FROM devices')->fetchAll() as $device) {
-            $id = (int)$device['id'];
-            $avg = (int)$pdo->query('SELECT COALESCE(AVG(k.confidence),50) FROM device_keys dk INNER JOIN api_keys k ON k.api_key=dk.api_key WHERE dk.device_id=' . $id)->fetchColumn();
-            $pdo->prepare('UPDATE devices SET confidence=:confidence WHERE id=:id')->execute([':confidence'=>$avg, ':id'=>$id]);
+        $dir = $this->GetStorageDirectory();
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) { throw new Exception('CSV-Verzeichnis konnte nicht erstellt werden: ' . $dir); }
+        if (!is_writable($dir)) { throw new Exception('CSV-Verzeichnis ist nicht beschreibbar: ' . $dir); }
+        foreach (self::CSV_FILES as $name => $header) {
+            $path = $this->GetCsvPath($name);
+            if (!is_file($path)) { $this->WriteRawCsv($path, [$header]); }
         }
+        $this->WriteCsvAssoc('meta', [['key' => 'schema_version', 'value' => (string)self::SCHEMA_VERSION]]);
     }
 
-    private function InitializeDatabase(): void
+    private function ReadCsvAssoc(string $name): array
     {
-        $dir = $this->GetDatabaseDirectory();
-        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) { throw new Exception('Datenbankverzeichnis konnte nicht erstellt werden: ' . $dir); }
-        $pdo = $this->OpenDatabase();
-        $this->CreateSchema($pdo);
+        $path = $this->GetCsvPath($name);
+        if (!is_file($path)) { return []; }
+        $handle = fopen($path, 'rb');
+        if ($handle === false) { throw new Exception('CSV konnte nicht gelesen werden: ' . $path); }
+        flock($handle, LOCK_SH);
+        $header = fgetcsv($handle, 0, ';');
+        $rows = [];
+        if (is_array($header)) {
+            while (($data = fgetcsv($handle, 0, ';')) !== false) {
+                $row = [];
+                foreach ($header as $index => $key) { $row[$key] = $data[$index] ?? ''; }
+                if (implode('', $row) !== '') { $rows[] = $row; }
+            }
+        }
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        return $rows;
     }
 
-    private function OpenDatabase(): PDO
+    private function WriteCsvAssoc(string $name, array $rows): void
     {
-        if (!$this->IsSqliteAvailable()) { throw new Exception('PDO SQLite ist nicht verfuegbar.'); }
-        $pdo = new PDO('sqlite:' . $this->GetDatabasePath());
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        return $pdo;
+        $header = self::CSV_FILES[$name];
+        $data = [$header];
+        foreach ($rows as $row) { $data[] = array_map(fn($key) => (string)($row[$key] ?? ''), $header); }
+        $this->WriteRawCsv($this->GetCsvPath($name), $data);
     }
 
-    private function CreateSchema(PDO $pdo): void
+    private function AppendCsvAssoc(string $name, array $rows): void
     {
-        $pdo->exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS scans (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT, host TEXT NOT NULL, port INTEGER NOT NULL, generated_keys INTEGER DEFAULT 0, found_keys INTEGER DEFAULT 0, duration_ms INTEGER DEFAULT 0, notes TEXT)');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS api_keys (api_key TEXT PRIMARY KEY, current_value TEXT, value_type TEXT, confidence INTEGER DEFAULT 0, suggested_name TEXT, is_favorite INTEGER DEFAULT 0, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, last_scan_id INTEGER)');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS observations (id INTEGER PRIMARY KEY AUTOINCREMENT, scan_id INTEGER NOT NULL, api_key TEXT NOT NULL, value TEXT, value_type TEXT, observed_at TEXT NOT NULL)');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS devices (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, device_type TEXT, confidence INTEGER DEFAULT 50, status_key TEXT, value_key TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL)');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS device_keys (device_id INTEGER NOT NULL, api_key TEXT NOT NULL, role TEXT, is_required INTEGER DEFAULT 0, direction TEXT DEFAULT \'read\', PRIMARY KEY(device_id, api_key))');
-        $pdo->prepare('INSERT OR REPLACE INTO meta(key, value) VALUES(:key, :value)')->execute([':key'=>'schema_version', ':value'=>(string)self::SCHEMA_VERSION]);
+        if (count($rows) === 0) { return; }
+        $path = $this->GetCsvPath($name);
+        $handle = fopen($path, 'ab');
+        if ($handle === false) { throw new Exception('CSV konnte nicht geschrieben werden: ' . $path); }
+        flock($handle, LOCK_EX);
+        foreach ($rows as $row) { fputcsv($handle, array_map(fn($key) => (string)($row[$key] ?? ''), self::CSV_FILES[$name]), ';'); }
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+
+    private function WriteRawCsv(string $path, array $rows): void
+    {
+        $tmp = $path . '.tmp';
+        $handle = fopen($tmp, 'wb');
+        if ($handle === false) { throw new Exception('CSV Temp-Datei konnte nicht erstellt werden: ' . $tmp); }
+        flock($handle, LOCK_EX);
+        foreach ($rows as $row) { fputcsv($handle, $row, ';'); }
+        fflush($handle);
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        if (!rename($tmp, $path)) { throw new Exception('CSV konnte nicht ersetzt werden: ' . $path); }
+    }
+
+    private function GetNextScanId(): int
+    {
+        $max = 0;
+        foreach ($this->ReadCsvAssoc('scans') as $scan) { $max = max($max, (int)($scan['scan_id'] ?? 0)); }
+        return $max + 1;
+    }
+
+    private function ClassifyDevice(string $key, string $now, array &$devices, array &$deviceKeys): void
+    {
+        if (strpos($key, '55.17106.') === 0) { $this->EnsureDevice('filter_pump', 'Filterpumpe', 'actuator', $key, $this->GetKeySuffix($key), $now, $devices, $deviceKeys); }
+        if (strpos($key, '55.17102.') === 0) { $this->EnsureDevice('pool_light', 'Poollicht', 'actuator', $key, $this->GetKeySuffix($key), $now, $devices, $deviceKeys); }
+        if (strpos($key, '34.') === 0) { $this->EnsureDevice('water_values', 'Wasserwerte', 'sensor_group', $key, 'measurement', $now, $devices, $deviceKeys); }
+        if (strpos($key, '13.') === 0) { $this->EnsureDevice('system_values', 'Systemwerte', 'system_group', $key, 'info', $now, $devices, $deviceKeys); }
+    }
+
+    private function EnsureDevice(string $code, string $name, string $type, string $apiKey, string $role, string $now, array &$devices, array &$deviceKeys): void
+    {
+        $existing = $devices[$code] ?? [];
+        $devices[$code] = ['code' => $code, 'name' => $name, 'device_type' => $type, 'confidence' => '80', 'status_key' => $role === 'status' ? $apiKey : ($existing['status_key'] ?? ''), 'value_key' => ($role === 'value' || $role === 'measurement') ? $apiKey : ($existing['value_key'] ?? ''), 'first_seen' => $existing['first_seen'] ?? $now, 'last_seen' => $now];
+        $deviceKeys[] = ['device_code' => $code, 'api_key' => $apiKey, 'role' => $role, 'is_required' => in_array($role, ['status', 'value', 'measurement'], true) ? '1' : '0', 'direction' => 'read'];
     }
 
     private function ApiGet(array $keys): array
@@ -436,24 +474,38 @@ class BayrolDiscovery extends IPSModule
         $host = trim($this->ReadPropertyString('Host')); if ($host === '') { throw new Exception('Host ist leer.'); }
         $url = 'http://' . $host . ':' . max(1, min(65535, $this->ReadPropertyInteger('Port'))) . '/cgi-bin/webgui.fcgi?sid=' . rawurlencode($this->CreateSid());
         $payload = json_encode(['get' => array_values($keys)]);
-        $context = stream_context_create(['http' => ['method'=>'POST', 'header'=>"Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n", 'content'=>$payload, 'timeout'=>max(1, $this->ReadPropertyInteger('Timeout')), 'ignore_errors'=>true]]);
+        if ($payload === false) { throw new Exception('JSON-Encoding fehlgeschlagen.'); }
+        $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n", 'content' => $payload, 'timeout' => max(1, $this->ReadPropertyInteger('Timeout')), 'ignore_errors' => true]]);
         $started = microtime(true); $raw = @file_get_contents($url, false, $context); $durationMs = (int)round((microtime(true) - $started) * 1000);
         if ($raw === false) { throw new Exception('HTTP request failed.'); }
-        $json = json_decode((string)$raw, true); if (!is_array($json)) { throw new Exception('Ungueltige JSON-Antwort.'); }
+        $json = json_decode((string)$raw, true);
+        if (!is_array($json)) { throw new Exception('Ungueltige JSON-Antwort.'); }
         if ((int)($json['status']['code'] ?? -1) !== 0) { throw new Exception('API Status ' . (int)($json['status']['code'] ?? -1)); }
-        $json['_meta'] = ['duration_ms'=>$durationMs]; return $json;
+        $json['_meta'] = ['duration_ms' => $durationMs];
+        return $json;
     }
 
-    private function BuildScanKeys(): array { $keys=[]; $suffixes=$this->ParseSuffixes($this->ReadPropertyString('ScanSuffixes')); $max=max(1,min(5000,$this->ReadPropertyInteger('ScanMaxKeys'))); for($g=max(1,$this->ReadPropertyInteger('ScanGroupStart'));$g<=max($g,$this->ReadPropertyInteger('ScanGroupEnd'));$g++){ for($o=max(1,$this->ReadPropertyInteger('ScanObjectStart'));$o<=max($o,$this->ReadPropertyInteger('ScanObjectEnd'));$o++){ foreach($suffixes as $s){ $keys[]=$g.'.'.$o.'.'.$s; if(count($keys)>=$max){return $keys;} } } } return $keys; }
-    private function ParseSuffixes(string $raw): array { $raw=str_replace(["\r\n","\r",',',';'],"\n",$raw); $r=[]; foreach(explode("\n",$raw) as $line){$s=trim($line); if($s!==''&&preg_match('/^[A-Za-z0-9_]+$/',$s)){$r[$s]=$s;}} return array_values($r ?: ['value']); }
-    private function DetectValueType(string $value): string { $n=str_replace(',','.',$value); if($value==='0'||$value==='1'){return 'boolean-candidate';} return is_numeric($n) ? (strpos($n,'.')===false?'integer':'float') : 'string'; }
-    private function GetConfidence(string $key, string $value): int { return in_array($key, ['34.4001.value','34.4022.value','34.4033.value','13.16507.text2','13.16509.text1','55.17102.status','55.17102.value','55.17106.status','55.17106.opmode','55.17106.value'], true) ? 100 : 60; }
-    private function GetKnownName(string $key): string { $n=['34.4001.value'=>'pH','34.4022.value'=>'Redox','34.4033.value'=>'Pooltemperatur','13.16507.text2'=>'Aussentemperatur T3','13.16509.text1'=>'Leitfaehigkeit','55.17106.status'=>'Filterpumpe Status','55.17106.opmode'=>'Filterpumpe Betriebsart','55.17106.value'=>'Filterpumpe Text','55.17102.status'=>'Poollicht Status','55.17102.value'=>'Poollicht Text']; return $n[$key] ?? ''; }
-    private function GetKeySuffix(string $key): string { $p=explode('.', $key); return end($p) ?: ''; }
+    private function BuildScanKeys(): array
+    {
+        $keys = []; $suffixes = $this->ParseSuffixes($this->ReadPropertyString('ScanSuffixes')); $max = max(1, min(5000, $this->ReadPropertyInteger('ScanMaxKeys')));
+        for ($g = max(1, $this->ReadPropertyInteger('ScanGroupStart')); $g <= max($g, $this->ReadPropertyInteger('ScanGroupEnd')); $g++) {
+            for ($o = max(1, $this->ReadPropertyInteger('ScanObjectStart')); $o <= max($o, $this->ReadPropertyInteger('ScanObjectEnd')); $o++) {
+                foreach ($suffixes as $s) { $keys[] = $g . '.' . $o . '.' . $s; if (count($keys) >= $max) { return $keys; } }
+            }
+        }
+        return $keys;
+    }
+
+    private function ParseSuffixes(string $raw): array { $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $raw); $r = []; foreach (explode("\n", $raw) as $line) { $s = trim($line); if ($s !== '' && preg_match('/^[A-Za-z0-9_]+$/', $s)) { $r[$s] = $s; } } return array_values($r ?: ['value']); }
+    private function DetectValueType(string $value): string { $n = str_replace(',', '.', $value); if ($value === '0' || $value === '1') { return 'boolean-candidate'; } return is_numeric($n) ? (strpos($n, '.') === false ? 'integer' : 'float') : 'string'; }
+    private function GetConfidence(string $key, string $value): int { return in_array($key, ['34.4001.value', '34.4022.value', '34.4033.value', '13.16507.text2', '13.16509.text1', '55.17102.status', '55.17102.value', '55.17106.status', '55.17106.opmode', '55.17106.value'], true) ? 100 : 60; }
+    private function GetKnownName(string $key): string { $n = ['34.4001.value' => 'pH', '34.4022.value' => 'Redox', '34.4033.value' => 'Pooltemperatur', '13.16507.text2' => 'Aussentemperatur T3', '13.16509.text1' => 'Leitfaehigkeit', '55.17106.status' => 'Filterpumpe Status', '55.17106.opmode' => 'Filterpumpe Betriebsart', '55.17106.value' => 'Filterpumpe Text', '55.17102.status' => 'Poollicht Status', '55.17102.value' => 'Poollicht Text']; return $n[$key] ?? ''; }
+    private function GetKeySuffix(string $key): string { $p = explode('.', $key); return end($p) ?: ''; }
     private function CleanString(string $value): string { return trim(html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8')); }
     private function CreateSid(): string { return 'SYMBAYROL' . substr(strtoupper(md5((string)microtime(true) . mt_rand())), 0, 23); }
-    private function GetDatabaseDirectory(): string { return rtrim(IPS_GetKernelDir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'user' . DIRECTORY_SEPARATOR . 'BayrolDiscovery'; }
-    private function GetDatabasePath(): string { return $this->GetDatabaseDirectory() . DIRECTORY_SEPARATOR . 'bayrol_discovery.sqlite'; }
-    private function IsSqliteAvailable(): bool { return class_exists('PDO') && in_array('sqlite', PDO::getAvailableDrivers(), true); }
-    private function SetValueSafe(string $ident, $value): void { $id=@$this->GetIDForIdent($ident); if($id!==false&&$id>0){SetValue($id,$value);} }
+    private function IndexBy(array $rows, string $key): array { $out = []; foreach ($rows as $row) { if (($row[$key] ?? '') !== '') { $out[$row[$key]] = $row; } } return $out; }
+    private function UniqueRows(array $rows, array $keys): array { $seen = []; $out = []; foreach ($rows as $row) { $hash = implode('|', array_map(fn($k) => $row[$k] ?? '', $keys)); if (!isset($seen[$hash])) { $seen[$hash] = true; $out[] = $row; } } return $out; }
+    private function GetStorageDirectory(): string { return rtrim(IPS_GetKernelDir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'user' . DIRECTORY_SEPARATOR . 'BayrolDiscovery'; }
+    private function GetCsvPath(string $name): string { return $this->GetStorageDirectory() . DIRECTORY_SEPARATOR . $name . '.csv'; }
+    private function SetValueSafe(string $ident, $value): void { $id = @$this->GetIDForIdent($ident); if ($id !== false && $id > 0) { SetValue($id, $value); } }
 }
