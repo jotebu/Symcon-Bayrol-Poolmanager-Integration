@@ -89,7 +89,24 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'],
                 ['type' => 'Button', 'caption' => 'Explorer jetzt ausfuehren', 'onClick' => 'BPM_RunExplorer($id); echo "Explorer ausgefuehrt. Ergebnis siehe Variable Explorer Rohdaten.";'],
                 ['type' => 'Button', 'caption' => 'Discovery-Assistent ausfuehren', 'onClick' => 'BPM_RunDiscovery($id); echo "Discovery ausgefuehrt. Es wurden keine Datenpunkte automatisch angelegt. Ergebnis siehe Discovery Ergebnis.";'],
-                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer und sicherer Discovery-Assistent ohne Auto-Import.']
+                ['type' => 'Label', 'caption' => 'Discovery Ergebnisliste: Anzeige nur zur Auswahl/Pruefung. Kein Datenpunkt wird automatisch importiert.'],
+                [
+                    'type' => 'List',
+                    'name' => 'DiscoveryResultList',
+                    'caption' => 'Gefundene Datenpunkte',
+                    'rowCount' => 12,
+                    'add' => false,
+                    'delete' => false,
+                    'sort' => ['column' => 'key', 'direction' => 'ascending'],
+                    'columns' => [
+                        ['name' => 'selected', 'caption' => 'Import', 'width' => '70px', 'add' => false, 'edit' => false],
+                        ['name' => 'key', 'caption' => 'API-Key', 'width' => '220px', 'add' => '', 'edit' => false],
+                        ['name' => 'value', 'caption' => 'Wert', 'width' => '220px', 'add' => '', 'edit' => false],
+                        ['name' => 'type', 'caption' => 'Typ', 'width' => '120px', 'add' => '', 'edit' => false]
+                    ],
+                    'values' => $this->BuildDiscoveryListValues()
+                ],
+                ['type' => 'Label', 'caption' => 'Version 0.1.0-alpha: Lesender Zugriff, Explorer und sichere Discovery-Ergebnisliste ohne Auto-Import.']
             ],
             'status' => [
                 ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'Aktiv'],
@@ -439,6 +456,33 @@ class BayrolPoolManager5 extends IPSModule
         return $json;
     }
 
+    private function BuildDiscoveryListValues(): array
+    {
+        $raw = $this->GetVariableValueByIdent('DiscoveryResult');
+        if (!is_string($raw) || trim($raw) === '' || strpos(trim($raw), '{') !== 0) {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || !isset($decoded['found']) || !is_array($decoded['found'])) {
+            return [];
+        }
+
+        $selectedKeys = array_flip($this->ParseKeyList($this->ReadPropertyString('SelectedImportKeys')));
+        $rows = [];
+
+        foreach ($decoded['found'] as $key => $info) {
+            $rows[] = [
+                'selected' => isset($selectedKeys[$key]) ? 'ja' : 'nein',
+                'key' => (string)$key,
+                'value' => (string)($info['value'] ?? ''),
+                'type' => (string)($info['type'] ?? 'unknown')
+            ];
+        }
+
+        return $rows;
+    }
+
     private function BuildDiscoveryKeys(): array
     {
         $groupStart = max(1, $this->ReadPropertyInteger('DiscoveryGroupStart'));
@@ -513,13 +557,22 @@ class BayrolPoolManager5 extends IPSModule
     private function DetectValueType(string $value): string
     {
         $normalized = str_replace(',', '.', $value);
-        if (is_numeric($normalized)) {
-            return strpos($normalized, '.') === false ? 'integer' : 'float';
-        }
         if ($value === '0' || $value === '1') {
             return 'boolean-candidate';
         }
+        if (is_numeric($normalized)) {
+            return strpos($normalized, '.') === false ? 'integer' : 'float';
+        }
         return 'string';
+    }
+
+    private function GetVariableValueByIdent(string $ident)
+    {
+        $id = @$this->GetIDForIdent($ident);
+        if ($id === false || $id <= 0) {
+            return null;
+        }
+        return GetValue($id);
     }
 
     private function ExtractHttpCode(array $headers): int
