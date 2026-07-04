@@ -1,27 +1,26 @@
-# BAYROL PoolManager 5 WebGUI API
+# PM5 API
 
-Diese Dokumentation beschreibt den bisher beobachteten lokalen API-Ablauf des BAYROL PoolManager 5.
+This document describes the currently known local WebGUI JSON API behavior of the BAYROL PoolManager 5.
 
-Die Schnittstelle ist bisher nicht als offizielle oeffentliche API dokumentiert. Sie wird von der lokalen Weboberflaeche des PoolManager verwendet.
+The API is not officially documented by BAYROL. All information is based on observed behavior during development and must be validated against real devices and firmware versions.
 
-## Basis-Endpunkt
+## Endpoint
+
+The local WebGUI uses an HTTP endpoint similar to:
 
 ```text
-POST http://<pm5-ip>/cgi-bin/webgui.fcgi?sid=<session-id>
+http://<host>:<port>/cgi-bin/webgui.fcgi?sid=<sid>
 ```
 
-## Content-Type
+Typical port:
 
-```http
-Content-Type: application/json;charset=UTF-8
-Accept: application/json
+```text
+80
 ```
 
-## Grundprinzip
+## Request format
 
-Die WebGUI sendet JSON-Objekte mit `set` und `get` an denselben FastCGI-Endpunkt.
-
-### Lesen von Werten
+Known read requests use HTTP POST with a JSON body:
 
 ```json
 {
@@ -33,58 +32,67 @@ Die WebGUI sendet JSON-Objekte mit `set` und `get` an denselben FastCGI-Endpunkt
 }
 ```
 
-### Beispielantwort
+## Response format
+
+A successful response usually contains:
 
 ```json
 {
+  "data": {
+    "34.4001.value": "7.23"
+  },
   "status": {
     "code": 0
   },
-  "data": {
-    "34.4001.value": "7.24",
-    "34.4022.value": "840",
-    "34.4033.value": "23.7"
+  "event": {
+    "type": 1,
+    "data": "48.30000.0"
   }
 }
 ```
 
-## Statuscode
+## SID behavior
 
-Bisher beobachtet:
+During testing, arbitrary SID values were accepted for read operations. The module therefore creates a generated SID for each request.
 
-| Code | Bedeutung |
-|---:|---|
-| 0 | Anfrage erfolgreich |
+This behavior may change with firmware updates and must be treated as an implementation detail.
 
-Weitere Fehlercodes muessen noch systematisch dokumentiert werden.
+## API status
 
-## Bekannte Key-Struktur
+Observed status code:
 
-Ein API-Key folgt offenbar diesem Muster:
+| Code | Meaning |
+|---|---|
+| 0 | successful request |
+| 3 | failed login attempt in login tests |
+
+## Object naming pattern
+
+Observed object keys use the structure:
 
 ```text
-<bereich>.<objekt>.<suffix>
+<group>.<object>.<suffix>
 ```
 
-Beispiel:
+Examples:
 
 ```text
 34.4001.value
+55.17106.status
+55.17106.opmode
+13.16507.text2
 ```
 
-Bekannte Suffixe:
+Common suffixes observed during testing:
 
-| Suffix | Bedeutung |
+| Suffix | Meaning |
 |---|---|
-| `value` | Wert / Textwert |
-| `status` | Statuscode / Betriebsstatus |
-| `pointer` | Zeigerposition in der WebGUI, vermutlich nur Visualisierung |
+| value | primary value or display text |
+| status | status value |
+| opmode | operation mode |
+| text1 | text field |
+| text2 | text field |
 
-Weitere Suffixe wie `name`, `unit`, `min`, `max` sind noch zu pruefen.
+## Write operations
 
-## Naechste Schritte
-
-- Login und Session-ID-Erzeugung vollstaendig dokumentieren
-- Fehlercodes sammeln
-- API-Key-Ranges systematisch analysieren
-- Datentypen und Einheiten ableiten
+Write operations are not part of version 0.1.0. They will only be implemented after safe behavior has been verified in the reverse engineering repository.
