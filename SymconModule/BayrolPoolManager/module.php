@@ -26,8 +26,8 @@ class BayrolPoolManager extends IPSModule
         $this->RegisterPropertyString('Host', '192.168.55.23');
         $this->RegisterPropertyInteger('Port', 80);
         $this->RegisterPropertyInteger('UpdateInterval', 60);
-        $this->RegisterPropertyBoolean('DebugMode', false);
         $this->RegisterPropertyInteger('Timeout', 10);
+        $this->RegisterPropertyBoolean('DebugMode', false);
 
         $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
     }
@@ -91,7 +91,7 @@ class BayrolPoolManager extends IPSModule
                 ],
                 [
                     'type' => 'Label',
-                    'caption' => 'Version 0.1: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
+                    'caption' => 'Version 0.1.0: Lesender Zugriff auf bekannte PM5 API-Datenpunkte.'
                 ]
             ],
             'status' => [
@@ -124,14 +124,10 @@ class BayrolPoolManager extends IPSModule
 
             $this->SetValue('ConnectionState', $ok);
             $this->SetValue('LastApiStatus', (int)($response['status']['code'] ?? -1));
-            $this->SetValue('LastError', $ok ? '' : 'API-Antwort enthaelt keinen pH-Key');
+            $this->SetValue('LastError', $ok ? '' : 'API response does not contain pH key');
+            $this->SetValue('LastUpdate', date('Y-m-d H:i:s'));
 
-            if ($ok) {
-                $this->SetStatus(IS_ACTIVE);
-            } else {
-                $this->SetStatus(202);
-            }
-
+            $this->SetStatus($ok ? IS_ACTIVE : 202);
             return $ok;
         } catch (Throwable $e) {
             $this->SetValue('ConnectionState', false);
