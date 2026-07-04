@@ -1,0 +1,14 @@
+{
+  "id": "{A8B76558-5D59-4B11-9EDB-92D2B7F9A6A4}",
+  "name": "Bayrol PoolManager",
+  "type": 3,
+  "vendor": "BAYROL",
+  "aliases": [
+    "Bayrol PoolManager 5",
+    "PoolManager 5"
+  ],
+  "parentRequirements": [],
+  "childRequirements": [],
+  "implemented": [],
+  "prefix": "BPM"
+}
