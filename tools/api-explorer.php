@@ -4,54 +4,66 @@
  *
  * Zweck:
  * - Schonender zweistufiger Scan der lokalen PM5 JSON-API
- * - Phase 1: Existenzscan nur ueber .value
+ * - Profilmodus fuer unterschiedliche Objektklassen
+ * - Phase 1: Existenzscan ueber profilabhaengiges Suffix
  * - Phase 2: Detailscan nur fuer gefundene Objekt-IDs
+ * - Watcher-Keys fuer bekannte Anzeige-/Soll-/Grenzwerte
  * - Platzhalterwerte werden gefiltert
  * - HTTP 500/503 werden erkannt und mit Backoff behandelt
- *
- * Nutzung:
- * - In IP-Symcon als normales PHP-Skript ausfuehren
- * - Zuerst mit den kleinen Default-Bereichen testen
- * - Bereiche danach schrittweise erweitern
  */
 
 $pm5Host = '192.168.55.23';
 $pm5Port = 80;
 $sid = 'APIEXPLORERLOWLOAD0000000001';
 
-// Scanbereiche: prefix => [start, end]
-// Diese Bereiche sind bewusst konservativ gehalten.
+// Profile:
+// measurement = numerische Mess-/Soll-/Grenzwerte, typisch Prefix 34
+// gauge       = Anzeige-/Dashboard-Elemente, typisch Prefix 13
+// status      = Text-/Statusmeldungen, typisch Prefix 15
+// actuator    = Ausgaenge/Relais/Aktoren, typisch Prefix 55
+$profile = 'measurement';
+
+// Scanbereiche passend zum Profil setzen.
 $ranges = [
-    13 => [16500, 16520],
-    14 => [16500, 16600],
-    15 => [16700, 16720],
     34 => [4000, 4050],
-    35 => [4000, 4050],
-    55 => [17100, 17130],
 ];
 
-// Phase 1 prueft nur dieses Suffix.
-$existenceSuffix = 'value';
-
-// Phase 2 prueft Detailfelder nur fuer gefundene Objekt-IDs.
-$detailSuffixes = [
-    'value',
-    'status',
-    'unit',
-    'name',
-    'min',
-    'max',
-    'pointer',
-    'color',
-    'text1',
-    'text2',
-    'state1',
-    'state2',
-    'enum',
-    'opmode'
+// Wichtige bekannte/gesuchte Einzelwerte, die immer zusaetzlich abgefragt werden.
+// Diese Liste bitte erweitern, sobald neue Kandidaten bekannt sind.
+$watchKeys = [
+    '34.4001.value', // pH Istwert
+    '34.4022.value', // Redox Istwert
+    '34.4033.value', // Pooltemperatur
+    '13.16507.text2', // T3 Aussentemperatur als Dashboard-Text
+    '13.16509.text1', // Leitfaehigkeit
 ];
 
-// PM5 schonen: kleine Batches und deutliche Pausen.
+$profiles = [
+    'measurement' => [
+        'existenceSuffix' => 'value',
+        'detailSuffixes' => ['value'],
+    ],
+    'gauge' => [
+        'existenceSuffix' => 'text1',
+        'detailSuffixes' => ['pointer', 'text1', 'text2', 'color', 'state1', 'state2'],
+    ],
+    'status' => [
+        'existenceSuffix' => 'value',
+        'detailSuffixes' => ['value', 'status', 'text1', 'text2', 'state1', 'state2'],
+    ],
+    'actuator' => [
+        'existenceSuffix' => 'value',
+        'detailSuffixes' => ['value', 'status', 'state1', 'state2', 'text1', 'text2'],
+    ],
+];
+
+if (!isset($profiles[$profile])) {
+    throw new Exception('Unknown profile: ' . $profile);
+}
+
+$existenceSuffix = $profiles[$profile]['existenceSuffix'];
+$detailSuffixes = $profiles[$profile]['detailSuffixes'];
+
 $batchSizePhase1 = 20;
 $batchSizePhase2 = 20;
 $pauseMicroseconds = 500000; // 0,5 Sekunden
@@ -59,20 +71,8 @@ $errorBackoffSeconds = 5;
 $maxConsecutiveErrors = 3;
 
 $placeholderValues = [
-    'value',
-    'status',
-    'unit',
-    'name',
-    'min',
-    'max',
-    'enum',
-    'opmode',
-    'color',
-    'text1',
-    'text2',
-    'state1',
-    'state2',
-    'pointer'
+    'value', 'status', 'unit', 'name', 'min', 'max', 'enum', 'opmode',
+    'color', 'text1', 'text2', 'state1', 'state2', 'pointer'
 ];
 
 function pm5Post(string $host, int $port, string $sid, array $payload): array
@@ -110,34 +110,18 @@ function pm5Post(string $host, int $port, string $sid, array $payload): array
 
 function classifyValue($value): string
 {
-    if (is_bool($value)) {
-        return 'bool';
-    }
-    if (is_int($value)) {
-        return 'int';
-    }
-    if (is_float($value)) {
-        return 'float';
-    }
-    if (!is_string($value)) {
-        return gettype($value);
-    }
+    if (is_bool($value)) return 'bool';
+    if (is_int($value)) return 'int';
+    if (is_float($value)) return 'float';
+    if (!is_string($value)) return gettype($value);
 
     $trimmed = trim(strip_tags($value));
     $normalized = str_replace(',', '.', $trimmed);
 
-    if ($trimmed === '') {
-        return 'empty-string';
-    }
-    if (preg_match('/^-?[0-9]+$/', $trimmed)) {
-        return 'int-string';
-    }
-    if (preg_match('/^-?[0-9]+\.[0-9]+$/', $normalized)) {
-        return 'float-string';
-    }
-    if ($trimmed !== $value) {
-        return 'html-string';
-    }
+    if ($trimmed === '') return 'empty-string';
+    if (preg_match('/^-?[0-9]+$/', $trimmed)) return 'int-string';
+    if (preg_match('/^-?[0-9]+\.[0-9]+$/', $normalized)) return 'float-string';
+    if ($trimmed !== $value) return 'html-string';
     return 'string';
 }
 
@@ -152,17 +136,12 @@ function cleanValue($value): string
 function isPlaceholder(string $key, $value, array $placeholderValues): bool
 {
     $clean = cleanValue($value);
-    if ($clean === '') {
-        return false;
-    }
+    if ($clean === '') return false;
 
     $parts = explode('.', $key);
     $suffix = end($parts);
 
-    if ($clean === $suffix) {
-        return true;
-    }
-
+    if ($clean === $suffix) return true;
     return in_array($clean, $placeholderValues, true);
 }
 
@@ -177,9 +156,7 @@ function chunkArray(array $items, int $size): array
             $chunk = [];
         }
     }
-    if (count($chunk) > 0) {
-        $chunks[] = $chunk;
-    }
+    if (count($chunk) > 0) $chunks[] = $chunk;
     return $chunks;
 }
 
@@ -201,6 +178,17 @@ function makeExistenceKeys(array $ranges, string $suffix): array
     return $keys;
 }
 
+function addRow(array &$rows, string $key, $value): void
+{
+    $objectId = objectIdFromKey($key);
+    $rows[$key] = [
+        'key' => $key,
+        'object' => $objectId,
+        'value' => cleanValue($value),
+        'type' => classifyValue($value)
+    ];
+}
+
 function printRows(array $rows): void
 {
     echo "| Key | Type | Value |\n";
@@ -220,71 +208,83 @@ function printCsv(array $rows): void
     }
 }
 
+function requestBatches(
+    string $label,
+    array $keys,
+    int $batchSize,
+    string $host,
+    int $port,
+    string $sid,
+    array $placeholderValues,
+    bool $filterPlaceholders,
+    int $pauseMicroseconds,
+    int $errorBackoffSeconds,
+    int $maxConsecutiveErrors,
+    int &$requestCount
+): array {
+    $rows = [];
+    $consecutiveErrors = 0;
+
+    foreach (chunkArray($keys, $batchSize) as $batch) {
+        $requestCount++;
+        $response = pm5Post($host, $port, $sid, ['get' => $batch]);
+        $json = $response['json'];
+
+        if (!is_array($json)) {
+            $consecutiveErrors++;
+            echo "{$label} request {$requestCount}: HTTP=" . $response['httpCode'] . " invalid JSON. Backoff {$errorBackoffSeconds}s\n";
+            echo substr((string)$response['raw'], 0, 160) . "\n";
+            sleep($errorBackoffSeconds);
+            if ($consecutiveErrors >= $maxConsecutiveErrors) {
+                echo "Too many consecutive errors. Stopping {$label}.\n";
+                break;
+            }
+            continue;
+        }
+
+        $consecutiveErrors = 0;
+        $code = $json['status']['code'] ?? 'NO_CODE';
+        $data = $json['data'] ?? [];
+        echo "{$label} request {$requestCount}: HTTP=" . $response['httpCode'] . ", status={$code}, asked=" . count($batch) . ", returned=" . (is_array($data) ? count($data) : 0) . "\n";
+
+        if (is_array($data)) {
+            foreach ($data as $key => $value) {
+                if ($filterPlaceholders && isPlaceholder($key, $value, $placeholderValues)) {
+                    continue;
+                }
+                addRow($rows, $key, $value);
+            }
+        }
+        usleep($pauseMicroseconds);
+    }
+
+    ksort($rows, SORT_NATURAL);
+    return $rows;
+}
+
 $started = microtime(true);
 $requestCount = 0;
-$consecutiveErrors = 0;
 $existingObjects = [];
-$phase1Rows = [];
-$phase2Rows = [];
 
 $phase1Keys = makeExistenceKeys($ranges, $existenceSuffix);
 
-echo "BAYROL PM5 API Explorer - staged low-load discovery\n";
+echo "BAYROL PM5 API Explorer - profile mode\n";
 echo "Host: {$pm5Host}:{$pm5Port}\n";
+echo "Profile: {$profile}\n";
+echo "Phase 1 suffix: .{$existenceSuffix}\n";
 echo "Phase 1 candidates: " . count($phase1Keys) . "\n";
 echo "Phase 1 batch size: {$batchSizePhase1}\n";
 echo "Phase 2 batch size: {$batchSizePhase2}\n";
 echo "Pause: " . ($pauseMicroseconds / 1000000) . "s\n\n";
 
 echo "==============================\n";
-echo "PHASE 1: existence scan using .{$existenceSuffix}\n";
+echo "PHASE 1: existence scan\n";
+$phase1Rows = requestBatches('Phase1', $phase1Keys, $batchSizePhase1, $pm5Host, $pm5Port, $sid, $placeholderValues, true, $pauseMicroseconds, $errorBackoffSeconds, $maxConsecutiveErrors, $requestCount);
 
-foreach (chunkArray($phase1Keys, $batchSizePhase1) as $batch) {
-    $requestCount++;
-    $response = pm5Post($pm5Host, $pm5Port, $sid, ['get' => $batch]);
-    $json = $response['json'];
-
-    if (!is_array($json)) {
-        $consecutiveErrors++;
-        echo "Phase1 request {$requestCount}: HTTP=" . $response['httpCode'] . " invalid JSON. Backoff {$errorBackoffSeconds}s\n";
-        echo substr((string)$response['raw'], 0, 160) . "\n";
-        sleep($errorBackoffSeconds);
-        if ($consecutiveErrors >= $maxConsecutiveErrors) {
-            echo "Too many consecutive errors. Stopping phase 1.\n";
-            break;
-        }
-        continue;
-    }
-
-    $consecutiveErrors = 0;
-    $code = $json['status']['code'] ?? 'NO_CODE';
-    $data = $json['data'] ?? [];
-
-    echo "Phase1 request {$requestCount}: HTTP=" . $response['httpCode'] . ", status={$code}, asked=" . count($batch) . ", returned=" . (is_array($data) ? count($data) : 0) . "\n";
-
-    if (is_array($data)) {
-        foreach ($data as $key => $value) {
-            if (isPlaceholder($key, $value, $placeholderValues)) {
-                continue;
-            }
-
-            $objectId = objectIdFromKey($key);
-            $existingObjects[$objectId] = true;
-            $phase1Rows[$key] = [
-                'key' => $key,
-                'object' => $objectId,
-                'value' => cleanValue($value),
-                'type' => classifyValue($value)
-            ];
-        }
-    }
-
-    usleep($pauseMicroseconds);
+foreach ($phase1Rows as $row) {
+    $existingObjects[$row['object']] = true;
 }
-
 ksort($existingObjects, SORT_NATURAL);
-ksort($phase1Rows, SORT_NATURAL);
-
 $objectIds = array_keys($existingObjects);
 
 echo "\nPhase 1 found real objects: " . count($objectIds) . "\n";
@@ -292,9 +292,8 @@ foreach ($objectIds as $objectId) {
     echo "  - {$objectId}\n";
 }
 
-if (count($objectIds) === 0) {
-    echo "\nNo real objects found in phase 1. Try different ranges or inspect placeholder filtering.\n";
-} else {
+$phase2Rows = [];
+if (count($objectIds) > 0) {
     echo "\n==============================\n";
     echo "PHASE 2: detail scan for found objects\n";
 
@@ -305,50 +304,18 @@ if (count($objectIds) === 0) {
         }
     }
 
-    foreach (chunkArray($detailKeys, $batchSizePhase2) as $batch) {
-        $requestCount++;
-        $response = pm5Post($pm5Host, $pm5Port, $sid, ['get' => $batch]);
-        $json = $response['json'];
-
-        if (!is_array($json)) {
-            $consecutiveErrors++;
-            echo "Phase2 request {$requestCount}: HTTP=" . $response['httpCode'] . " invalid JSON. Backoff {$errorBackoffSeconds}s\n";
-            echo substr((string)$response['raw'], 0, 160) . "\n";
-            sleep($errorBackoffSeconds);
-            if ($consecutiveErrors >= $maxConsecutiveErrors) {
-                echo "Too many consecutive errors. Stopping phase 2.\n";
-                break;
-            }
-            continue;
-        }
-
-        $consecutiveErrors = 0;
-        $code = $json['status']['code'] ?? 'NO_CODE';
-        $data = $json['data'] ?? [];
-
-        echo "Phase2 request {$requestCount}: HTTP=" . $response['httpCode'] . ", status={$code}, asked=" . count($batch) . ", returned=" . (is_array($data) ? count($data) : 0) . "\n";
-
-        if (is_array($data)) {
-            foreach ($data as $key => $value) {
-                if (isPlaceholder($key, $value, $placeholderValues)) {
-                    continue;
-                }
-
-                $objectId = objectIdFromKey($key);
-                $phase2Rows[$key] = [
-                    'key' => $key,
-                    'object' => $objectId,
-                    'value' => cleanValue($value),
-                    'type' => classifyValue($value)
-                ];
-            }
-        }
-
-        usleep($pauseMicroseconds);
-    }
+    $phase2Rows = requestBatches('Phase2', $detailKeys, $batchSizePhase2, $pm5Host, $pm5Port, $sid, $placeholderValues, true, $pauseMicroseconds, $errorBackoffSeconds, $maxConsecutiveErrors, $requestCount);
+} else {
+    echo "\nNo real objects found in phase 1. Check profile/range/suffix.\n";
 }
 
-ksort($phase2Rows, SORT_NATURAL);
+$watchRows = [];
+if (count($watchKeys) > 0) {
+    echo "\n==============================\n";
+    echo "WATCH KEYS: known and searched values\n";
+    $watchRows = requestBatches('Watch', $watchKeys, $batchSizePhase2, $pm5Host, $pm5Port, $sid, $placeholderValues, false, $pauseMicroseconds, $errorBackoffSeconds, $maxConsecutiveErrors, $requestCount);
+}
+
 $duration = round(microtime(true) - $started, 2);
 
 echo "\n==============================\n";
@@ -357,6 +324,7 @@ echo "Requests total: {$requestCount}\n";
 echo "Phase 1 candidates: " . count($phase1Keys) . "\n";
 echo "Objects found: " . count($objectIds) . "\n";
 echo "Detail keys found: " . count($phase2Rows) . "\n";
+echo "Watch keys returned: " . count($watchRows) . "\n";
 echo "Duration: {$duration}s\n\n";
 
 echo "PHASE 1 REAL VALUE KEYS\n";
@@ -365,5 +333,11 @@ printRows($phase1Rows);
 echo "\nPHASE 2 DETAILS\n";
 printRows($phase2Rows);
 
-echo "\nCSV\n";
+echo "\nWATCH KEYS\n";
+printRows($watchRows);
+
+echo "\nCSV DETAILS\n";
 printCsv($phase2Rows);
+
+echo "\nCSV WATCH\n";
+printCsv($watchRows);
