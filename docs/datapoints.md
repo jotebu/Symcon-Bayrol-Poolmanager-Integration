@@ -7,7 +7,9 @@ Diese Datei dokumentiert bestaetigte Datenpunkte der lokalen BAYROL PoolManager 
 Die konkrete semantische Bedeutung vieler Datenpunkte muss noch verifiziert werden. Aktuell ist sicher:
 
 - Prefix `34` enthaelt numerische Mess-, Soll- oder Grenzwerte.
-- `.value` liefert den eigentlichen Wert.
+- Prefix `13` enthaelt Dashboard-/Gauge-Anzeigeelemente.
+- Prefix `55` enthaelt Anzeige- und Statusobjekte fuer Ausgaenge/Aktoren.
+- `.value` liefert je nach Objektklasse den Messwert oder den Anzeigenamen.
 - Viele Werte sind ohne Login lesbar.
 - Mehrere Keys koennen denselben Anzeige- oder Regelwert enthalten.
 
@@ -23,10 +25,23 @@ Vom Anwender gemeldete aktuelle Werte zum Zeitpunkt des Scans:
 | Heizung | aus | - | - | aktuell blockiert |
 | Rueckspuelung | aus | - | - | Automatik ein |
 | Lampen Becken | aus | - | - | Automatik ein |
-| Filterpumpe | aus | - | - | Automatik ein |
+| Filterpumpe | aus | - | - | Modi: eco, normal, high, auto, aus |
 | Wassernachspeisung | aus | - | - | - |
 | Flockmatic-Pumpe | aus | - | - | aktuell blockiert |
 | Aussentemperatur / T3 | `14.3` | - | - | aus Gauge-Text `T3 14.3°C` beobachtet |
+
+## Bestaetigte Kernwerte fuer Symcon/KNX
+
+| Bedeutung | Wert-Key | Zusatz-Key | Interpretation |
+|---|---|---|---|
+| pH Istwert | `34.4001.value` | - | numerisch, z. B. `7.23` |
+| Redox Istwert | `34.4022.value` | - | numerisch in mV, z. B. `836` |
+| Pooltemperatur | `34.4033.value` | - | numerisch in °C, z. B. `23.0` |
+| Aussentemperatur T3 | `13.16507.text2` | - | Text, z. B. `T3 14.5°C`; muss geparst werden |
+| Leitfaehigkeit / Salz | `13.16509.text1` | `55.17118.value` | `5.0mS/cm` bzw. `Salz-Gehalt 3.0g/l (5.0mS/cm)` |
+| Lampen Becken | `55.17102.status` | `55.17102.value` | `0 = EIN`, `1 = AUS`; `.value` ist Anzeigename |
+| Filterpumpe Status | `55.17106.status` | `55.17106.value` | `0 = laeuft/aktiv`, `1 = aus/inaktiv`; `.value` enthaelt Anzeigename inkl. Modus-Text |
+| Filterpumpe Betriebsart | `55.17106.opmode` | `55.17106.value` | `0 = Auto`, `1 = Eco`, `2 = Aus`; Normal/High noch offen |
 
 ## Prefix 34 - erster Scan 4001 bis 4050
 
@@ -85,6 +100,22 @@ Quelle: API Explorer, Bereich `34 => [4000, 4050]`, zweistufiger Low-Load-Scan.
 | `34.4049.value` | float-string | `7.35` | pH-naher Soll-/Grenzwert, noch zu klaeren |
 | `34.4050.value` | float-string | `7.34` | pH-naher Soll-/Grenzwert, noch zu klaeren |
 
+## Prefix 55 - Ausgaenge / Aktoren / Anzeigeobjekte
+
+| Bedeutung | Objekt | Relevante Keys | Bestaetigte Werte / Status |
+|---|---|---|---|
+| Lampen Becken | `55.17102` | `.value`, `.status` | `.value = Lampen Becken`; `.status: 0 = EIN, 1 = AUS` |
+| Flockmatic-Pumpe | `55.17105` | `.value`, `.status`, `.opmode` | `.value = Flockmatic-Pumpe (blockiert)`; aktuell `.status = 1`, `.opmode = 2` |
+| Filterpumpe | `55.17106` | `.value`, `.status`, `.opmode` | `.status: 0 = aktiv/laeuft, 1 = inaktiv/aus`; `.opmode: 0 = Auto, 1 = Eco, 2 = Aus` |
+| Spar-Betrieb | `55.17107` | `.value`, `.status`, `.opmode` | noch zu klaeren; aktuell `.status = 1`, `.opmode = 2` |
+| Heizung | `55.17108` | `.value`, `.status`, `.opmode` | noch zu klaeren; aktuell `.status = 1`, `.opmode = 2` |
+| Solar | `55.17109` | `.value`, `.status`, `.opmode` | noch zu klaeren; aktuell `.status = 1`, `.opmode = 2` |
+| Salz-Elektrolyse | `55.17110` | `.value`, `.status` | noch zu klaeren; aktuell `.status = 1` |
+| LAN/Web/Webportal | `55.17111` | `.value`, `.status` | Anzeige z. B. `4 LAN / 0 Web / 0 Webportal ✔`; `.status = 0` |
+| Salz-Gehalt | `55.17118` | `.value`, `.status` | `.value = Salz-Gehalt 3.0g/l (5.0mS/cm)`; `.status = 0` |
+| Behaelter | `55.17119` | `.value`, `.status` | `.value = Behaelter: 0 cm`; `.status = 1` |
+| Rueckspuelung | `55.17120` | `.value`, `.status` | noch zu klaeren; aktuell `.status = 1` |
+
 ## Abgeleitete Zuordnungen aus bekannten Anlagenwerten
 
 ### Sicher bestaetigt
@@ -94,6 +125,10 @@ Quelle: API Explorer, Bereich `34 => [4000, 4050]`, zweistufiger Low-Load-Scan.
 | pH Istwert | `34.4001.value` | Wert entspricht pH `7.23`; bereits vorher aus WebGUI/HAR als pH bekannt |
 | Redox Istwert | `34.4022.value` | Wert entspricht Redox `836`; bereits vorher aus WebGUI/HAR als Redox bekannt |
 | Pooltemperatur | `34.4033.value` | Wert entspricht Pooltemperatur `23.1` bis `23.2`; bereits vorher aus WebGUI/HAR als Temperatur bekannt |
+| Aussentemperatur T3 | `13.16507.text2` | Text entspricht `T3 14.3°C` bis `T3 14.5°C` |
+| Lampen Becken Status | `55.17102.status` | Wechsel EIN/AUS bestaetigt: EIN=`0`, AUS=`1` |
+| Filterpumpe Status | `55.17106.status` | Eco-Betrieb bestaetigt aktiv=`0`; Auto/Aus inaktiv=`1` |
+| Filterpumpe Betriebsart | `55.17106.opmode` | Auto=`0`, Eco=`1`, Aus=`2`; weitere Modi offen |
 
 ### Plausibel, aber noch nicht sicher
 
@@ -105,27 +140,25 @@ Quelle: API Explorer, Bereich `34 => [4000, 4050]`, zweistufiger Low-Load-Scan.
 
 ## Noch nicht gefunden / weitere Scans erforderlich
 
-Diese bekannten Werte konnten im Bereich `34.4001` bis `34.4050` noch nicht eindeutig zugeordnet werden:
+Diese bekannten Werte konnten noch nicht eindeutig zugeordnet werden:
 
 - pH Minimum `6.00`
 - pH Maximum `7.80`
 - Redox Minimum `400`
 - Redox Maximum `900`
 - Pooltemperatur Sollwert `25.0`
-- Aussentemperatur / T3 `14.3`
+- Filterpumpe Modus `normal`
+- Filterpumpe Modus `high`
 - Status Heizung aus / blockiert
 - Status Rueckspuelung aus / Automatik ein
-- Status Lampen Becken aus / Automatik ein
-- Status Filterpumpe aus / Automatik ein
 - Status Wassernachspeisung aus
 - Status Flockmatic-Pumpe aus / blockiert
 
-Naechste sinnvolle Scans:
+Naechste sinnvolle Tests:
 
-- Prefix `13` fuer Anzeige-/Gauge-Texte, insbesondere T3 `14.3°C`
-- Prefix `15` fuer Status-/Textmeldungen
-- Prefix `55` fuer Relais/Ausgaenge wie Filterpumpe, Lampen, Rueckspuelung
-- Erweiterter Prefix `34` ueber `4050` hinaus, um Soll- und Grenzwerte zu finden
+- Filterpumpe auf `normal` stellen und `55.17106.opmode/status/value` vergleichen.
+- Filterpumpe auf `high` stellen und `55.17106.opmode/status/value` vergleichen.
+- Optional Rueckspuelung, Heizung, Wassernachspeisung nur dann testen, wenn gefahrlos moeglich.
 
 ## Erkenntnisse aus dem ersten stabilen Low-Load-Scan
 
