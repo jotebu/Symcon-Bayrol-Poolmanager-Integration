@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-class BayrolPoolManager extends IPSModule
+class BayrolPoolManager5 extends IPSModule
 {
     private const TIMER_UPDATE = 'UpdateTimer';
 
