@@ -46,12 +46,13 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterPropertyInteger('UpdateInterval', 60);
         $this->RegisterPropertyInteger('Timeout', 10);
         $this->RegisterPropertyBoolean('DebugMode', false);
-        $this->RegisterPropertyString('ExplorerKeys', "34.4001.value\n34.4022.value\n34.4033.value\n13.16507.text2\n13.16509.text1\n55.17106.status\n55.17106.opmode\n55.17106.value");
+
+        $this->RegisterPropertyString('ExplorerKeys', '34.4001.value;34.4022.value;34.4033.value;13.16507.text2;13.16509.text1;55.17106.status;55.17106.opmode;55.17106.value');
         $this->RegisterPropertyInteger('DiscoveryGroupStart', 34);
         $this->RegisterPropertyInteger('DiscoveryGroupEnd', 55);
         $this->RegisterPropertyInteger('DiscoveryObjectStart', 4000);
         $this->RegisterPropertyInteger('DiscoveryObjectEnd', 17200);
-        $this->RegisterPropertyString('DiscoverySuffixes', "value\nstatus\nopmode\ntext1\ntext2");
+        $this->RegisterPropertyString('DiscoverySuffixes', 'value;status;opmode;text1;text2');
         $this->RegisterPropertyInteger('DiscoveryMaxKeys', 500);
         $this->RegisterPropertyInteger('DiscoveryBatchSize', 50);
         $this->RegisterPropertyString('DiscoveryFilterKey', '');
@@ -90,14 +91,14 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'UpdateInterval', 'caption' => 'Aktualisierungsintervall in Sekunden'],
                 ['type' => 'NumberSpinner', 'name' => 'Timeout', 'caption' => 'HTTP Timeout in Sekunden'],
                 ['type' => 'CheckBox', 'name' => 'DebugMode', 'caption' => 'Erweiterte Debug-Ausgaben'],
-                ['type' => 'Label', 'caption' => 'Explorer: Nur lesende JSON-POST get-Abfragen. Keine Schreib-/Aktorbefehle.'],
-                ['type' => 'TextBox', 'name' => 'ExplorerKeys', 'caption' => 'Explorer API-Keys, ein Key pro Zeile'],
+                ['type' => 'Label', 'caption' => 'Explorer: Nur lesende JSON-POST get-Abfragen. Mehrere Eintraege mit Semikolon, Komma oder Zeilenumbruch trennen.'],
+                ['type' => 'ValidationTextBox', 'name' => 'ExplorerKeys', 'caption' => 'Explorer API-Keys'],
                 ['type' => 'Label', 'caption' => 'Discovery-Assistent: findet Datenpunkte, legt aber keine gefundenen Datenpunkte automatisch im Objektbaum an.'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryGroupStart', 'caption' => 'Discovery Gruppe von'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryGroupEnd', 'caption' => 'Discovery Gruppe bis'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryObjectStart', 'caption' => 'Discovery Objekt-ID von'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryObjectEnd', 'caption' => 'Discovery Objekt-ID bis'],
-                ['type' => 'TextBox', 'name' => 'DiscoverySuffixes', 'caption' => 'Discovery Suffixe, ein Suffix pro Zeile'],
+                ['type' => 'ValidationTextBox', 'name' => 'DiscoverySuffixes', 'caption' => 'Discovery Suffixe'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryMaxKeys', 'caption' => 'Maximale Discovery-Keys pro Lauf'],
                 ['type' => 'NumberSpinner', 'name' => 'DiscoveryBatchSize', 'caption' => 'Discovery Batchgroesse'],
                 ['type' => 'Label', 'caption' => 'Discovery Filter und Auswahl'],
@@ -105,8 +106,8 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'DiscoveryFilterValue', 'caption' => 'Filter Wert enthaelt'],
                 ['type' => 'ValidationTextBox', 'name' => 'DiscoveryFilterType', 'caption' => 'Filter Typ enthaelt'],
                 ['type' => 'CheckBox', 'name' => 'DiscoveryOnlyFound', 'caption' => 'Nur gefundene Datenpunkte anzeigen'],
-                ['type' => 'TextBox', 'name' => 'FavoriteKeys', 'caption' => 'Favoriten-Keys, ein Key pro Zeile'],
-                ['type' => 'TextBox', 'name' => 'SelectedImportKeys', 'caption' => 'Ausgewaehlte Import-Keys, ein Key pro Zeile']
+                ['type' => 'ValidationTextBox', 'name' => 'FavoriteKeys', 'caption' => 'Favoriten-Keys'],
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedImportKeys', 'caption' => 'Ausgewaehlte Import-Keys']
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'],
