@@ -7,12 +7,12 @@ class BayrolDiscovery extends IPSModule
     private const STATUS_ACTIVE = 102;
     private const STATUS_STORAGE_ERROR = 202;
     private const STATUS_API_ERROR = 203;
-    private const SCHEMA_VERSION = 3;
+    private const SCHEMA_VERSION = 4;
 
     private const CSV_FILES = [
         'meta' => ['key', 'value'],
         'scans' => ['scan_id', 'started_at', 'finished_at', 'host', 'port', 'generated_keys', 'found_keys', 'duration_ms', 'notes'],
-        'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id', 'comment', 'gateway_variable_name'],
+        'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id', 'comment', 'gateway_variable_name', 'gateway_import_enabled'],
         'observations' => ['scan_id', 'api_key', 'value', 'value_type', 'observed_at'],
         'devices' => ['code', 'name', 'device_type', 'confidence', 'status_key', 'value_key', 'first_seen', 'last_seen'],
         'device_keys' => ['device_code', 'api_key', 'role', 'is_required', 'direction'],
@@ -86,18 +86,19 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPD_TestConnection($id);'],
                 ['type' => 'Button', 'caption' => 'Scan starten', 'onClick' => 'echo BPD_RunScan($id);'],
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
-                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0: Schnellfilter durchsucht API-Key, Name, Gateway-Name, Wert, Typ, Vertrauen, Device und Kommentar.'],
+                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0: Schnellfilter durchsucht API-Key, Name, Gateway-Name, Importstatus, Wert, Typ, Vertrauen, Device und Kommentar.'],
                 ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
-                ['type' => 'Label', 'caption' => 'Zeile markieren; Details, Kommentar, Gateway-Variablenname und Favorit verwenden direkt diese Zeile.'],
+                ['type' => 'Label', 'caption' => 'Zeile markieren; Details, Kommentar, Gateway-Variablenname, Gateway-Import und Favorit verwenden direkt diese Zeile.'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetailsFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKeyComment', 'caption' => 'Kommentar fuer markierte Zeile'],
                 ['type' => 'Button', 'caption' => 'Kommentar speichern', 'onClick' => 'echo BPD_SaveApiKeyCommentFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedApiKeyComment);'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedGatewayVariableName', 'caption' => 'Gateway-Variablenname fuer markierte Zeile'],
                 ['type' => 'Button', 'caption' => 'Gateway-Variablenname speichern', 'onClick' => 'echo BPD_SaveGatewayVariableNameFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedGatewayVariableName);'],
+                ['type' => 'Button', 'caption' => 'Gateway-Import umschalten', 'onClick' => 'echo BPD_ToggleGatewayImportFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
-                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Details und Export-Vorschau verwenden direkt die markierte Zeile.'],
+                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Details und Export-Vorschau verwenden direkt die markierte Zeile. Die Export-Vorschau enthaelt nur fuer den Gateway-Import aktivierte Keys.'],
                 ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetailsFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Device Export-Vorschau', 'onClick' => 'echo BPD_PreviewDeviceExportFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 $this->GetDeviceListDefinition()
@@ -176,7 +177,8 @@ class BayrolDiscovery extends IPSModule
                         'last_seen' => $started,
                         'last_scan_id' => (string) $scanId,
                         'comment' => $existing['comment'] ?? '',
-                        'gateway_variable_name' => $existing['gateway_variable_name'] ?? ''
+                        'gateway_variable_name' => $existing['gateway_variable_name'] ?? '',
+                        'gateway_import_enabled' => $existing['gateway_import_enabled'] ?? '0'
                     ];
                     $observations[] = ['scan_id' => (string) $scanId, 'api_key' => (string) $key, 'value' => $clean, 'value_type' => $type, 'observed_at' => $started];
                     $this->ClassifyDevice((string) $key, $started, $devices, $deviceKeys);
@@ -255,7 +257,7 @@ class BayrolDiscovery extends IPSModule
         $history = array_slice(array_reverse($historyAll), 0, 12);
         $lines = [];
         foreach ($history as $h) { $lines[] = ($h['observed_at'] ?? '') . ' | Scan ' . ($h['scan_id'] ?? '') . ' | ' . ($h['value'] ?? '') . ' | ' . ($h['value_type'] ?? ''); }
-        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nName: " . ($row['suggested_name'] ?? '') . "\nGateway-Variablenname: " . ($row['gateway_variable_name'] ?? '') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
+        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nName: " . ($row['suggested_name'] ?? '') . "\nGateway-Variablenname: " . ($row['gateway_variable_name'] ?? '') . "\nGateway-Import: " . (($row['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
         $this->SetValueSafe('SelectedApiKeyDetails', $detail);
         return $detail;
     }
@@ -294,6 +296,24 @@ class BayrolDiscovery extends IPSModule
         return 'Gateway-Variablenname gespeichert: ' . $key . ' -> ' . (trim($name) !== '' ? trim($name) : '[Vorschlagsname]');
     }
 
+    public function ToggleGatewayImport(): string
+    {
+        return $this->ToggleGatewayImportFor($this->ReadPropertyString('SelectedApiKey'));
+    }
+
+    public function ToggleGatewayImportFor(string $key): string
+    {
+        $key = trim($key);
+        if ($key === '') { return 'Keine Browser-Zeile ausgewaehlt.'; }
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
+        $enabled = (($apiKeys[$key]['gateway_import_enabled'] ?? '0') === '1') ? '0' : '1';
+        $apiKeys[$key]['gateway_import_enabled'] = $enabled;
+        $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+        $this->UpdateBrowserFormList($this->BuildBrowserRows());
+        return 'Gateway-Import ' . ($enabled === '1' ? 'aktiviert' : 'deaktiviert') . ': ' . $key;
+    }
+
     public function ToggleFavorite(): string
     {
         return $this->ToggleFavoriteFor($this->ReadPropertyString('SelectedApiKey'));
@@ -327,7 +347,7 @@ class BayrolDiscovery extends IPSModule
         $lines = [];
         foreach ($keys as $k) {
             $api = $apiKeys[$k['api_key']] ?? [];
-            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . ($k['api_key'] ?? '') . ' | ' . ($api['current_value'] ?? '') . ' | ' . ($api['value_type'] ?? '');
+            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . ($k['api_key'] ?? '') . ' | Import: ' . (($api['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . ' | ' . ($api['current_value'] ?? '') . ' | ' . ($api['value_type'] ?? '');
         }
         $d = $devices[$code];
         $detail = 'Device: ' . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\nStatus-Key: " . ($d['status_key'] ?? '') . "\nValue-Key: " . ($d['value_key'] ?? '') . "\n\nKeys:\n" . implode("\n", $lines);
@@ -347,6 +367,7 @@ class BayrolDiscovery extends IPSModule
         foreach ($keys as $k) {
             $apiKey = $k['api_key'] ?? '';
             $api = $apiKeys[$apiKey] ?? [];
+            if (($api['gateway_import_enabled'] ?? '0') !== '1') { continue; }
             $explicitName = trim((string) ($api['gateway_variable_name'] ?? ''));
             $suggestedName = trim((string) ($api['suggested_name'] ?? ''));
             $variableName = $explicitName !== '' ? $explicitName : ($suggestedName !== '' ? $suggestedName : $apiKey);
@@ -354,7 +375,7 @@ class BayrolDiscovery extends IPSModule
             $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . $apiKey . ' | Variable: ' . $variableName . ' [' . $source . '] | Typ: ' . ($api['value_type'] ?? '') . ' | Wert: ' . ($api['current_value'] ?? '');
         }
         $d = $devices[$code];
-        $preview = 'Gateway Export-Vorschau' . "\nDevice: " . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\n\nVariablen:\n" . implode("\n", $lines);
+        $preview = 'Gateway Export-Vorschau' . "\nDevice: " . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\nAktivierte Variablen: " . count($lines) . "\n\nVariablen:\n" . (count($lines) > 0 ? implode("\n", $lines) : '[keine fuer Gateway-Import aktiviert]');
         $this->SetValueSafe('DeviceExportPreview', $preview);
         return $preview;
     }
@@ -385,17 +406,18 @@ class BayrolDiscovery extends IPSModule
         return ['type' => 'List', 'name' => 'BrowserList', 'caption' => 'API-Key Browser 2.0', 'rowCount' => 16, 'add' => false, 'delete' => false, 'loadValuesFromConfiguration' => false,
             'columns' => [
                 ['name' => 'favorite', 'caption' => 'Fav', 'width' => '45px', 'add' => '', 'edit' => false],
+                ['name' => 'gateway_import', 'caption' => 'Import', 'width' => '60px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'confidence', 'caption' => 'Vertrauen', 'width' => '80px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'api_key', 'caption' => 'API-Key', 'width' => '180px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'suggested_name', 'caption' => 'Name', 'width' => '150px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'gateway_variable_name', 'caption' => 'Gateway-Name', 'width' => '170px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'current_value', 'caption' => 'Wert', 'width' => '150px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'api_key', 'caption' => 'API-Key', 'width' => '170px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'suggested_name', 'caption' => 'Name', 'width' => '140px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'gateway_variable_name', 'caption' => 'Gateway-Name', 'width' => '160px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'current_value', 'caption' => 'Wert', 'width' => '140px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'value_type', 'caption' => 'Typ', 'width' => '100px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'device', 'caption' => 'Device', 'width' => '120px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'observations', 'caption' => 'Obs', 'width' => '60px', 'add' => '', 'edit' => false],
                 ['name' => 'first_seen', 'caption' => 'Erst gesehen', 'width' => '140px', 'add' => '', 'edit' => false],
                 ['name' => 'last_seen', 'caption' => 'Zuletzt', 'width' => '140px', 'add' => '', 'edit' => false],
-                ['name' => 'comment', 'caption' => 'Kommentar', 'width' => '200px', 'add' => '', 'edit' => false, 'quickFilter' => true]
+                ['name' => 'comment', 'caption' => 'Kommentar', 'width' => '190px', 'add' => '', 'edit' => false, 'quickFilter' => true]
             ], 'values' => $this->BuildBrowserRowsSafe()];
     }
 
@@ -408,6 +430,7 @@ class BayrolDiscovery extends IPSModule
                 ['name' => 'device_type', 'caption' => 'Typ', 'width' => '130px', 'add' => '', 'edit' => false],
                 ['name' => 'confidence', 'caption' => 'Vertrauen', 'width' => '85px', 'add' => '', 'edit' => false],
                 ['name' => 'key_count', 'caption' => 'Keys', 'width' => '60px', 'add' => '', 'edit' => false],
+                ['name' => 'import_count', 'caption' => 'Import', 'width' => '60px', 'add' => '', 'edit' => false],
                 ['name' => 'status_key', 'caption' => 'Status-Key', 'width' => '170px', 'add' => '', 'edit' => false]
             ], 'values' => $this->BuildDeviceRowsSafe()];
     }
@@ -425,6 +448,7 @@ class BayrolDiscovery extends IPSModule
             $device = $deviceByKey[$key] ?? '';
             $rows[] = [
                 'favorite' => (($r['is_favorite'] ?? '0') === '1') ? 'ja' : '',
+                'gateway_import' => (($r['gateway_import_enabled'] ?? '0') === '1') ? 'ja' : '',
                 'confidence' => $r['confidence'] ?? '',
                 'api_key' => $key,
                 'suggested_name' => $r['suggested_name'] ?? '',
@@ -445,9 +469,20 @@ class BayrolDiscovery extends IPSModule
     private function BuildDeviceRows(): array
     {
         $counts = [];
-        foreach ($this->ReadCsvAssoc('device_keys') as $dk) { $code = $dk['device_code'] ?? ''; if ($code !== '') { $counts[$code] = ($counts[$code] ?? 0) + 1; } }
+        $importCounts = [];
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        foreach ($this->ReadCsvAssoc('device_keys') as $dk) {
+            $code = $dk['device_code'] ?? '';
+            $apiKey = $dk['api_key'] ?? '';
+            if ($code === '') { continue; }
+            $counts[$code] = ($counts[$code] ?? 0) + 1;
+            if (($apiKeys[$apiKey]['gateway_import_enabled'] ?? '0') === '1') { $importCounts[$code] = ($importCounts[$code] ?? 0) + 1; }
+        }
         $rows = [];
-        foreach ($this->ReadCsvAssoc('devices') as $d) { $code = $d['code'] ?? ''; $rows[] = ['code' => $code, 'name' => $d['name'] ?? '', 'device_type' => $d['device_type'] ?? '', 'confidence' => $d['confidence'] ?? '', 'key_count' => (string) ($counts[$code] ?? 0), 'status_key' => $d['status_key'] ?? '']; }
+        foreach ($this->ReadCsvAssoc('devices') as $d) {
+            $code = $d['code'] ?? '';
+            $rows[] = ['code' => $code, 'name' => $d['name'] ?? '', 'device_type' => $d['device_type'] ?? '', 'confidence' => $d['confidence'] ?? '', 'key_count' => (string) ($counts[$code] ?? 0), 'import_count' => (string) ($importCounts[$code] ?? 0), 'status_key' => $d['status_key'] ?? ''];
+        }
         return $rows;
     }
 
