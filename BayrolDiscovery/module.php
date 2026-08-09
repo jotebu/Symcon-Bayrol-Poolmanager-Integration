@@ -96,7 +96,8 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPD_TestConnection($id);'],
                 ['type' => 'Button', 'caption' => 'Scan starten', 'onClick' => 'echo BPD_RunScan($id);'],
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
-                ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
+                ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowserFiltered($id, (string) $BrowserSearch, (string) $BrowserTypeFilter, (int) $BrowserMinConfidence, (bool) $BrowserFavoritesOnly, (string) $BrowserDeviceFilter);'],
+                ['type' => 'Label', 'caption' => 'Die Browser-Filter werden beim Klick direkt aus dem Formular ausgewertet; kein Speichern/Übernehmen erforderlich.'],
                 ['type' => 'Label', 'caption' => 'Zeile im Browser markieren; Details, Kommentar und Favorit verwenden direkt diese Zeile.'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetailsFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Kommentar speichern', 'onClick' => 'echo BPD_SaveApiKeyCommentFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedApiKeyComment);'],
@@ -225,10 +226,22 @@ class BayrolDiscovery extends IPSModule
 
     public function LoadBrowser(): string
     {
-        $rows = $this->BuildBrowserRows();
+        return $this->LoadBrowserFiltered(
+            $this->ReadPropertyString('BrowserSearch'),
+            $this->ReadPropertyString('BrowserTypeFilter'),
+            $this->ReadPropertyInteger('BrowserMinConfidence'),
+            $this->ReadPropertyBoolean('BrowserFavoritesOnly'),
+            $this->ReadPropertyString('BrowserDeviceFilter')
+        );
+    }
+
+    public function LoadBrowserFiltered(string $search, string $typeFilter, int $minConfidence, bool $favoritesOnly, string $deviceFilter): string
+    {
+        $rows = $this->BuildBrowserRowsFiltered($search, $typeFilter, $minConfidence, $favoritesOnly, $deviceFilter);
         $this->UpdateBrowserFormList($rows);
-        $this->SetValueSafe('BrowserSummary', 'API-Key Browser 2.0 geladen. Zeilen: ' . count($rows));
-        return 'API-Key Browser 2.0 geladen. Zeilen: ' . count($rows);
+        $message = 'API-Key Browser 2.0 geladen. Zeilen: ' . count($rows);
+        $this->SetValueSafe('BrowserSummary', $message);
+        return $message;
     }
 
     public function LoadDevices(): string
@@ -369,11 +382,21 @@ class BayrolDiscovery extends IPSModule
 
     private function BuildBrowserRows(): array
     {
-        $search = mb_strtolower(trim($this->ReadPropertyString('BrowserSearch')));
-        $typeFilter = mb_strtolower(trim($this->ReadPropertyString('BrowserTypeFilter')));
-        $deviceFilter = mb_strtolower(trim($this->ReadPropertyString('BrowserDeviceFilter')));
-        $minConfidence = max(0, min(100, $this->ReadPropertyInteger('BrowserMinConfidence')));
-        $favoritesOnly = $this->ReadPropertyBoolean('BrowserFavoritesOnly');
+        return $this->BuildBrowserRowsFiltered(
+            $this->ReadPropertyString('BrowserSearch'),
+            $this->ReadPropertyString('BrowserTypeFilter'),
+            $this->ReadPropertyInteger('BrowserMinConfidence'),
+            $this->ReadPropertyBoolean('BrowserFavoritesOnly'),
+            $this->ReadPropertyString('BrowserDeviceFilter')
+        );
+    }
+
+    private function BuildBrowserRowsFiltered(string $search, string $typeFilter, int $minConfidence, bool $favoritesOnly, string $deviceFilter): array
+    {
+        $search = mb_strtolower(trim($search));
+        $typeFilter = mb_strtolower(trim($typeFilter));
+        $deviceFilter = mb_strtolower(trim($deviceFilter));
+        $minConfidence = max(0, min(100, $minConfidence));
         $counts = $this->GetObservationCounts();
         $deviceByKey = $this->GetDeviceByKeyMap();
         $rows = [];
