@@ -1,48 +1,72 @@
 # Symcon Bayrol PoolManager Integration
 
-IP-Symcon module library for local integration of the BAYROL PoolManager 5 (PM5).
+IP-Symcon Modulbibliothek fuer die lokale Integration des BAYROL PoolManager 5 (PM5).
 
-This repository contains only the installable IP-Symcon module. Reverse engineering tools, API explorers, learning scripts, and test utilities are maintained separately in:
+Die Bibliothek enthaelt zwei klar getrennte Module:
 
-https://github.com/jotebu/Symcon-Bayrol-Poolmanager-ReverseEngineering
+- `BayrolPoolManager` - produktives Gateway fuer den laufenden Betrieb
+- `BayrolDiscovery` - lesendes Analyse- und Reverse-Engineering-Werkzeug fuer API-Keys und Device-Zuordnungen
 
-## Project status
+## Projektstatus
 
-Current phase: Sprint 0 - repository foundation.
+Aktueller Entwicklungsstand: **0.2.0**.
 
-Goal of Sprint 0:
+Der Stand wurde auf IP-Symcon 9.0 mit einem BAYROL PoolManager 5 regressionsgetestet. Der produktive Gateway-Betrieb und das Discovery-Modul arbeiten getrennt, verwenden aber dieselbe bekannte PM5-WebGUI-API.
 
-- clean IP-Symcon library structure
-- no experimental tools in this repository
-- basic documentation
-- clear separation between integration and reverse engineering
+### Gateway
 
-Goal of version 0.1.0:
+Das Modul `BayrolPoolManager` bietet aktuell:
 
-- installable IP-Symcon library
-- one module: BayrolPoolManager
-- local HTTP JSON communication with PM5
-- cyclic polling of first known values
-- automatic creation of initial variables
-- debug and status handling
+- lokale HTTP/JSON-Kommunikation mit dem PM5
+- Verbindungstest
+- zyklische Aktualisierung
+- pH
+- Redox
+- Pooltemperatur
+- Aussentemperatur T3
+- Leitfaehigkeit
+- Poollicht-Status und Text
+- Filterpumpen-Status, Betriebsart und Text
+- Status-, Fehler- und Antwortzeit-Diagnose
 
-## Supported hardware
+Die frueher im Gateway enthaltenen experimentellen Discovery-/Explorer-Funktionen wurden entfernt. Reverse Engineering findet ausschliesslich im separaten `BayrolDiscovery`-Modul statt.
 
-Initial target:
+### Discovery
 
+Das Modul `BayrolDiscovery` bietet aktuell:
+
+- read-only Zugriff auf die PM5-WebGUI-API
+- konfigurierbare API-Key-Scans
+- CSV-Storage unter `user/BayrolDiscovery`
+- Schema-Version 2 mit automatischer Header-Migration
+- Scan-Historie und Beobachtungshistorie
+- API-Key Browser 2.0 mit Symcon-Schnellfilter
+- Suche ueber API-Key, Name, Wert, Typ, Vertrauen, Device und Kommentar
+- API-Key Detailansicht mit Historie
+- Favoriten und Kommentare pro API-Key
+- Device Browser und Device-Detailansicht
+- automatische Erstklassifizierung fuer `water_values`, `filter_pump`, `pool_light` und `system_values`
+- automatisch gepflegte Scan-Zusammenfassung
+
+SQLite/PDO wird nicht verwendet, da die getestete eingebettete Symcon-PHP-Umgebung diese Erweiterungen nicht bereitstellt.
+
+## Getestete Umgebung
+
+- IP-Symcon 9.0
+- Raspberry Pi
 - BAYROL PoolManager 5 / PM5
+- bekannte getestete Firmware: `v240729-M1 / 9.1.1`
 
-Known tested firmware during development:
+Andere BAYROL-Geraete koennen eine aehnliche WebGUI-API verwenden, sind derzeit aber nicht freigegeben.
 
-- v240729-M1 / 9.1.1
-
-Other BAYROL devices may use a similar WebGUI API, but are not supported yet.
-
-## Repository layout
+## Repository-Struktur
 
 ```text
 library.json
 BayrolPoolManager/
+  module.json
+  module.php
+BayrolDiscovery/
   module.json
   module.php
 README.md
@@ -51,51 +75,68 @@ LICENSE
 CONTRIBUTING.md
 SECURITY.md
 docs/
+  regression-0.2.0-alpha.md
 ```
 
 ## Installation in IP-Symcon
 
-1. Open the IP-Symcon management console.
-2. Open Module Control.
-3. Add this repository URL:
+1. IP-Symcon Management Console oeffnen.
+2. Module Control oeffnen.
+3. Folgende Repository-URL hinzufuegen:
 
 ```text
 https://github.com/jotebu/Symcon-Bayrol-Poolmanager-Integration.git
 ```
 
-4. Update the module library.
-5. Create a new instance of Bayrol PoolManager 5.
-6. Configure the PM5 host/IP address.
-7. Test the connection.
+4. Modulbibliothek aktualisieren.
+5. Fuer den produktiven Betrieb eine Instanz `Bayrol PoolManager 5` anlegen.
+6. PM5 Host/IP konfigurieren und Verbindung testen.
+7. Fuer Analysezwecke optional eine separate Instanz `BayrolDiscovery` anlegen.
 
-Detailed steps will be documented in `docs/installation.md`.
+## Bestaetigte API-Keys
 
-## First known API objects
-
-| API key | Meaning | Status |
+| API-Key | Bedeutung | Status |
 |---|---|---|
-| 34.4001.value | pH | confirmed |
-| 34.4022.value | Redox | confirmed |
-| 34.4033.value | pool temperature | confirmed |
-| 13.16507.text2 | outdoor temperature T3 | confirmed |
-| 13.16509.text1 | conductivity | confirmed |
-| 55.17106.value | filter pump text | confirmed |
-| 55.17106.status | filter pump status | confirmed |
-| 55.17106.opmode | filter pump operation mode | confirmed |
+| `34.4001.value` | pH | bestaetigt |
+| `34.4022.value` | Redox | bestaetigt |
+| `34.4033.value` | Pooltemperatur | bestaetigt |
+| `13.16507.text2` | Aussentemperatur T3 | bestaetigt |
+| `13.16509.text1` | Leitfaehigkeit | bestaetigt |
+| `55.17102.status` | Poollicht Status | bestaetigt |
+| `55.17102.value` | Poollicht Text | bestaetigt |
+| `55.17106.status` | Filterpumpe Status | bestaetigt |
+| `55.17106.opmode` | Filterpumpe Betriebsart | bestaetigt |
+| `55.17106.value` | Filterpumpe Text | bestaetigt |
 
-## Roadmap
+## Discovery-CSV-Dateien
 
-- 0.1.0: first installable module with basic polling
-- 0.2.0: extended polling and variable manager
-- 0.3.0: improved API object mapping
-- 0.4.0: discovery support
-- 0.5.0: actuator control after safe write API confirmation
-- 1.0.0: stable release
+Das Discovery-Modul verwendet semikolon-getrennte CSV-Dateien im Symcon-User-Verzeichnis:
 
-## Security note
+- `meta.csv`
+- `scans.csv`
+- `api_keys.csv`
+- `observations.csv`
+- `devices.csv`
+- `device_keys.csv`
+- `tags.csv`
+- `key_tags.csv`
 
-The PM5 WebGUI API is local and currently treated as an undocumented interface. Use this module only inside a trusted local network.
+Die Dateien liegen bewusst ausserhalb des Modul-Quellverzeichnisses und bleiben bei Modulupdates erhalten.
 
-## License
+## Naechster Entwicklungsschritt
 
-MIT License. See `LICENSE`.
+Nach dem abgeschlossenen 0.2.0-Regressionstest ist als naechste Ausbaustufe der **device-orientierte Import in das produktive Gateway** vorgesehen. Ziel ist, bestaetigte Discovery-Ergebnisse nicht als rohe API-Keys, sondern als fachliche Objekte wie Wasserwerte, Filterpumpe und Poollicht zu uebernehmen.
+
+Schreibzugriffe auf PM5-Aktoren bleiben bis zur getrennten sicheren Analyse der Write-API ausserhalb des produktiven Funktionsumfangs.
+
+## Regressionstest
+
+Der feste Regressionstest fuer 0.2.0 ist unter `docs/regression-0.2.0-alpha.md` dokumentiert. Der Test wurde erfolgreich mit Gateway, CSV-Storage, API-Key Browser 2.0, Device Layer und zyklischem Gateway-Polling durchgefuehrt.
+
+## Sicherheit
+
+Die verwendete PM5-WebGUI-API ist eine undokumentierte lokale Schnittstelle. Das Modul sollte nur in einem vertrauenswuerdigen lokalen Netzwerk eingesetzt werden. Discovery fuehrt ausschliesslich lesende PM5-Abfragen aus.
+
+## Lizenz
+
+MIT License. Siehe `LICENSE`.
