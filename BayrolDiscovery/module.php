@@ -80,14 +80,7 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'ScanSuffixes', 'caption' => 'Scan Suffixe'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanMaxKeys', 'caption' => 'Maximale Keys pro Scan'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanBatchSize', 'caption' => 'Batchgroesse'],
-                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0'],
-                ['type' => 'ValidationTextBox', 'name' => 'BrowserSearch', 'caption' => 'Suche API-Key, Name, Wert, Kommentar'],
-                ['type' => 'ValidationTextBox', 'name' => 'BrowserTypeFilter', 'caption' => 'Typfilter'],
-                ['type' => 'NumberSpinner', 'name' => 'BrowserMinConfidence', 'caption' => 'Minimales Vertrauen'],
-                ['type' => 'CheckBox', 'name' => 'BrowserFavoritesOnly', 'caption' => 'Nur Favoriten anzeigen'],
-                ['type' => 'ValidationTextBox', 'name' => 'BrowserDeviceFilter', 'caption' => 'Device-Filter'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKey', 'caption' => 'API-Key (Fallback/manuell)'],
-                ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKeyComment', 'caption' => 'Kommentar'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Ausgewaehlter Device-Code']
             ],
             'actions' => [
@@ -96,10 +89,16 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPD_TestConnection($id);'],
                 ['type' => 'Button', 'caption' => 'Scan starten', 'onClick' => 'echo BPD_RunScan($id);'],
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
+                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0 - Filter gelten sofort und muessen nicht gespeichert werden.'],
+                ['type' => 'ValidationTextBox', 'name' => 'BrowserSearch', 'caption' => 'Suche API-Key, Name, Wert, Kommentar'],
+                ['type' => 'ValidationTextBox', 'name' => 'BrowserTypeFilter', 'caption' => 'Typfilter'],
+                ['type' => 'NumberSpinner', 'name' => 'BrowserMinConfidence', 'caption' => 'Minimales Vertrauen'],
+                ['type' => 'CheckBox', 'name' => 'BrowserFavoritesOnly', 'caption' => 'Nur Favoriten anzeigen'],
+                ['type' => 'ValidationTextBox', 'name' => 'BrowserDeviceFilter', 'caption' => 'Device-Filter'],
                 ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowserFiltered($id, (string) $BrowserSearch, (string) $BrowserTypeFilter, (int) $BrowserMinConfidence, (bool) $BrowserFavoritesOnly, (string) $BrowserDeviceFilter);'],
-                ['type' => 'Label', 'caption' => 'Die Browser-Filter werden beim Klick direkt aus dem Formular ausgewertet; kein Speichern/Übernehmen erforderlich.'],
                 ['type' => 'Label', 'caption' => 'Zeile im Browser markieren; Details, Kommentar und Favorit verwenden direkt diese Zeile.'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetailsFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKeyComment', 'caption' => 'Kommentar fuer markierte Zeile'],
                 ['type' => 'Button', 'caption' => 'Kommentar speichern', 'onClick' => 'echo BPD_SaveApiKeyCommentFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedApiKeyComment);'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 $this->GetApiKeyListDefinition(),
@@ -226,13 +225,7 @@ class BayrolDiscovery extends IPSModule
 
     public function LoadBrowser(): string
     {
-        return $this->LoadBrowserFiltered(
-            $this->ReadPropertyString('BrowserSearch'),
-            $this->ReadPropertyString('BrowserTypeFilter'),
-            $this->ReadPropertyInteger('BrowserMinConfidence'),
-            $this->ReadPropertyBoolean('BrowserFavoritesOnly'),
-            $this->ReadPropertyString('BrowserDeviceFilter')
-        );
+        return $this->LoadBrowserFiltered('', '', 0, false, '');
     }
 
     public function LoadBrowserFiltered(string $search, string $typeFilter, int $minConfidence, bool $favoritesOnly, string $deviceFilter): string
@@ -286,7 +279,6 @@ class BayrolDiscovery extends IPSModule
         if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
         $apiKeys[$key]['comment'] = trim($comment);
         $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
-        $this->UpdateBrowserFormList($this->BuildBrowserRows());
         return 'Kommentar gespeichert: ' . $key;
     }
 
@@ -303,7 +295,6 @@ class BayrolDiscovery extends IPSModule
         if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
         $apiKeys[$key]['is_favorite'] = (($apiKeys[$key]['is_favorite'] ?? '0') === '1') ? '0' : '1';
         $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
-        $this->UpdateBrowserFormList($this->BuildBrowserRows());
         return 'Favorit umgeschaltet: ' . $key;
     }
 
@@ -382,13 +373,7 @@ class BayrolDiscovery extends IPSModule
 
     private function BuildBrowserRows(): array
     {
-        return $this->BuildBrowserRowsFiltered(
-            $this->ReadPropertyString('BrowserSearch'),
-            $this->ReadPropertyString('BrowserTypeFilter'),
-            $this->ReadPropertyInteger('BrowserMinConfidence'),
-            $this->ReadPropertyBoolean('BrowserFavoritesOnly'),
-            $this->ReadPropertyString('BrowserDeviceFilter')
-        );
+        return $this->BuildBrowserRowsFiltered('', '', 0, false, '');
     }
 
     private function BuildBrowserRowsFiltered(string $search, string $typeFilter, int $minConfidence, bool $favoritesOnly, string $deviceFilter): array
