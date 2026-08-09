@@ -27,20 +27,17 @@ class BayrolPoolManager5 extends IPSModule
     public function Create()
     {
         parent::Create();
-
         $this->RegisterPropertyString('Host', '192.168.55.23');
         $this->RegisterPropertyInteger('Port', 80);
         $this->RegisterPropertyInteger('UpdateInterval', 60);
         $this->RegisterPropertyInteger('Timeout', 10);
         $this->RegisterPropertyBoolean('DebugMode', false);
-
         $this->RegisterTimer(self::TIMER_UPDATE, 0, 'BPM_UpdateValues($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges()
     {
         parent::ApplyChanges();
-
         $this->CreateProfiles();
         $this->RegisterVariables();
 
@@ -83,18 +80,15 @@ class BayrolPoolManager5 extends IPSModule
     public function TestConnection(): bool
     {
         $this->SendDebugMessage('TestConnection', 'Start');
-
         try {
             $response = $this->ApiGet(['34.4001.value']);
             $ok = isset($response['data']['34.4001.value']);
-
             $this->SetValueSafe('ConnectionState', $ok);
             $this->SetValueSafe('LastApiStatus', (int) ($response['status']['code'] ?? -1));
             $this->SetValueSafe('LastError', $ok ? '' : 'API response does not contain pH key');
             $this->SetValueSafe('LastUpdate', date('Y-m-d H:i:s'));
             $this->SetValueSafe('LastSuccessfulUpdate', $ok ? date('Y-m-d H:i:s') : '');
             $this->SetStatus($ok ? self::STATUS_ACTIVE : self::STATUS_API_ERROR);
-
             return $ok;
         } catch (Throwable $e) {
             $this->HandleError('TestConnection', $e);
@@ -121,14 +115,12 @@ class BayrolPoolManager5 extends IPSModule
 
             foreach ($definitions as $definition) {
                 $deviceCode = $definition['device_code'];
-                $deviceName = $definition['device_name'];
                 $deviceCategoryId = $this->EnsureCategory(
                     $rootId,
                     'BPMDevice_' . $this->MakeSafeIdent($deviceCode),
-                    $deviceName,
+                    $definition['device_name'],
                     10
                 );
-
                 $positionByDevice[$deviceCode] = ($positionByDevice[$deviceCode] ?? 0) + 10;
                 $result = $this->EnsureImportedVariable($deviceCategoryId, $definition, $positionByDevice[$deviceCode]);
                 if ($result === 'created') {
@@ -166,7 +158,6 @@ class BayrolPoolManager5 extends IPSModule
             $this->SendDebugMessage('UpdateValues', 'Reading ' . count($keys) . ' keys');
             $response = $this->ApiGet($keys);
             $data = $response['data'] ?? [];
-
             if (!is_array($data)) {
                 throw new Exception('Invalid API data block');
             }
@@ -194,15 +185,12 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterVariableFloat('PoolTemperature', 'Pooltemperatur', '~Temperature', 30);
         $this->RegisterVariableFloat('OutdoorTemperature', 'Aussentemperatur T3', '~Temperature', 40);
         $this->RegisterVariableFloat('Conductivity', 'Leitfaehigkeit', 'BPM.Conductivity', 50);
-
         $this->RegisterVariableBoolean('PoolLightActive', 'Lampen Becken aktiv', '~Switch', 100);
         $this->RegisterVariableString('PoolLightText', 'Lampen Becken Text', '', 101);
-
         $this->RegisterVariableBoolean('FilterPumpActive', 'Filterpumpe aktiv', '~Switch', 110);
         $this->RegisterVariableInteger('FilterPumpOpmode', 'Filterpumpe Betriebsart', 'BPM.FilterOpmode', 111);
         $this->RegisterVariableString('FilterPumpText', 'Filterpumpe Text', '', 112);
         $this->RegisterVariableString('FilterPumpDetailedMode', 'Filterpumpe Detailmodus', '', 113);
-
         $this->RegisterVariableBoolean('ConnectionState', 'Verbindung aktiv', '~Switch', 200);
         $this->RegisterVariableString('LastUpdate', 'Letzte Aktualisierung', '', 201);
         $this->RegisterVariableString('LastSuccessfulUpdate', 'Letzte erfolgreiche Aktualisierung', '', 202);
@@ -220,7 +208,6 @@ class BayrolPoolManager5 extends IPSModule
         $this->CreateIntegerProfile('BPM.Redox', 'Electricity', '', ' mV', 0, 1000, 1);
         $this->CreateFloatProfile('BPM.Conductivity', 'Electricity', '', ' mS/cm', 0, 20, 0.1, 1);
         $this->CreateIntegerProfile('BPM.Milliseconds', 'Clock', '', ' ms', 0, 60000, 1);
-
         if (!IPS_VariableProfileExists('BPM.FilterOpmode')) {
             IPS_CreateVariableProfile('BPM.FilterOpmode', VARIABLETYPE_INTEGER);
         }
@@ -256,14 +243,11 @@ class BayrolPoolManager5 extends IPSModule
         $this->SetIntegerFromKey('Redox', $data, self::API_KEYS['Redox']);
         $this->SetFloatFromKey('PoolTemperature', $data, self::API_KEYS['PoolTemperature']);
 
-        $outdoorText = $this->CleanString((string) ($data[self::API_KEYS['OutdoorTemperatureText']] ?? ''));
-        $outdoor = $this->ExtractFirstNumber($outdoorText);
+        $outdoor = $this->ExtractFirstNumber($this->CleanString((string) ($data[self::API_KEYS['OutdoorTemperatureText']] ?? '')));
         if ($outdoor !== null) {
             $this->SetValueSafe('OutdoorTemperature', $outdoor);
         }
-
-        $conductivityText = $this->CleanString((string) ($data[self::API_KEYS['ConductivityText']] ?? ''));
-        $conductivity = $this->ExtractFirstNumber($conductivityText);
+        $conductivity = $this->ExtractFirstNumber($this->CleanString((string) ($data[self::API_KEYS['ConductivityText']] ?? '')));
         if ($conductivity !== null) {
             $this->SetValueSafe('Conductivity', $conductivity);
         }
@@ -278,12 +262,10 @@ class BayrolPoolManager5 extends IPSModule
         if ($filterStatus !== null) {
             $this->SetValueSafe('FilterPumpActive', $filterStatus === 0);
         }
-
         $filterOpmode = $this->GetIntValue($data, self::API_KEYS['FilterPumpOpmode']);
         if ($filterOpmode !== null) {
             $this->SetValueSafe('FilterPumpOpmode', $filterOpmode);
         }
-
         $filterText = $this->CleanString((string) ($data[self::API_KEYS['FilterPumpText']] ?? ''));
         $this->SetValueSafe('FilterPumpText', $filterText);
         $this->SetValueSafe('FilterPumpDetailedMode', $this->ParseFilterDetailedMode($filterText));
@@ -305,7 +287,6 @@ class BayrolPoolManager5 extends IPSModule
         $apiPath = $directory . DIRECTORY_SEPARATOR . 'api_keys.csv';
         $deviceKeysPath = $directory . DIRECTORY_SEPARATOR . 'device_keys.csv';
         $devicesPath = $directory . DIRECTORY_SEPARATOR . 'devices.csv';
-
         if (!is_file($apiPath)) {
             throw new Exception('api_keys.csv nicht gefunden: ' . $apiPath);
         }
@@ -341,7 +322,6 @@ class BayrolPoolManager5 extends IPSModule
             if (($row['gateway_import_enabled'] ?? '0') !== '1') {
                 continue;
             }
-
             $apiKey = trim((string) ($row['api_key'] ?? ''));
             if ($apiKey === '') {
                 continue;
@@ -355,28 +335,62 @@ class BayrolPoolManager5 extends IPSModule
             if ($deviceName === '') {
                 $deviceName = $deviceCode === 'unassigned' ? 'Nicht zugeordnet' : $deviceCode;
             }
-
             $customName = trim((string) ($row['gateway_variable_name'] ?? ''));
             $suggestedName = trim((string) ($row['suggested_name'] ?? ''));
             $variableName = $customName !== '' ? $customName : ($suggestedName !== '' ? $suggestedName : $apiKey);
 
-            $definitions[] = [
+            $definition = [
                 'api_key' => $apiKey,
                 'variable_name' => $variableName,
                 'value_type' => trim((string) ($row['value_type'] ?? 'string')),
                 'device_code' => $deviceCode,
                 'device_name' => $deviceName,
                 'role' => $roleByKey[$apiKey] ?? '',
-                'confidence' => trim((string) ($row['confidence'] ?? ''))
+                'confidence' => trim((string) ($row['confidence'] ?? '')),
+                'profile' => '',
+                'transform' => 'generic'
             ];
+            $definitions[] = $this->ApplyKnownImportSemantics($definition);
         }
 
         usort($definitions, static function (array $a, array $b): int {
             $deviceCompare = strcmp($a['device_code'], $b['device_code']);
             return $deviceCompare !== 0 ? $deviceCompare : strcmp($a['api_key'], $b['api_key']);
         });
-
         return $definitions;
+    }
+
+    private function ApplyKnownImportSemantics(array $definition): array
+    {
+        switch ($definition['api_key']) {
+            case '34.4001.value':
+                $definition['value_type'] = 'float';
+                $definition['profile'] = 'BPM.pH';
+                break;
+            case '34.4022.value':
+                $definition['value_type'] = 'integer';
+                $definition['profile'] = 'BPM.Redox';
+                break;
+            case '34.4033.value':
+                $definition['value_type'] = 'float';
+                $definition['profile'] = '~Temperature';
+                break;
+            case '55.17102.status':
+            case '55.17106.status':
+                $definition['value_type'] = 'boolean-candidate';
+                $definition['profile'] = '~Switch';
+                $definition['transform'] = 'active_when_zero';
+                break;
+            case '55.17106.opmode':
+                $definition['value_type'] = 'integer';
+                $definition['profile'] = 'BPM.FilterOpmode';
+                break;
+            case '55.17102.value':
+            case '55.17106.value':
+                $definition['value_type'] = 'string';
+                break;
+        }
+        return $definition;
     }
 
     private function EnsureImportedVariable(int $parentId, array $definition, int $position): string
@@ -384,31 +398,36 @@ class BayrolPoolManager5 extends IPSModule
         $ident = $this->GetImportedVariableIdent($definition['api_key']);
         $expectedType = $this->MapDiscoveryTypeToSymconType($definition['value_type']);
         $variableId = @IPS_GetObjectIDByIdent($ident, $parentId);
+        $created = false;
 
         if ($variableId === false || $variableId <= 0) {
             $variableId = IPS_CreateVariable($expectedType);
             IPS_SetParent($variableId, $parentId);
             IPS_SetIdent($variableId, $ident);
-            IPS_SetName($variableId, $definition['variable_name']);
-            IPS_SetPosition($variableId, $position);
-            IPS_SetInfo($variableId, 'Bayrol Discovery API-Key: ' . $definition['api_key'] . '; Rolle: ' . $definition['role']);
-            return 'created';
-        }
-
-        $variable = IPS_GetVariable($variableId);
-        if ((int) ($variable['VariableType'] ?? -1) !== $expectedType) {
-            return 'type_conflict';
+            $created = true;
+        } else {
+            $variable = IPS_GetVariable($variableId);
+            if ((int) ($variable['VariableType'] ?? -1) !== $expectedType) {
+                return 'type_conflict';
+            }
         }
 
         IPS_SetPosition($variableId, $position);
-        IPS_SetInfo($variableId, 'Bayrol Discovery API-Key: ' . $definition['api_key'] . '; Rolle: ' . $definition['role']);
-        $object = IPS_GetObject($variableId);
-        if (($object['ObjectName'] ?? '') !== $definition['variable_name']) {
-            IPS_SetName($variableId, $definition['variable_name']);
-            return 'renamed';
+        IPS_SetInfo($variableId, 'Bayrol Discovery API-Key: ' . $definition['api_key'] . '; Rolle: ' . $definition['role'] . '; Transform: ' . $definition['transform']);
+        $profile = (string) ($definition['profile'] ?? '');
+        if ($profile !== '' && IPS_VariableProfileExists($profile)) {
+            IPS_SetVariableCustomProfile($variableId, $profile);
         }
 
-        return 'reused';
+        $object = IPS_GetObject($variableId);
+        $renamed = (($object['ObjectName'] ?? '') !== $definition['variable_name']);
+        if ($renamed) {
+            IPS_SetName($variableId, $definition['variable_name']);
+        }
+        if ($created) {
+            return 'created';
+        }
+        return $renamed ? 'renamed' : 'reused';
     }
 
     private function UpdateImportedVariables(array $data, array $definitions): void
@@ -422,29 +441,33 @@ class BayrolPoolManager5 extends IPSModule
             if (!array_key_exists($definition['api_key'], $data)) {
                 continue;
             }
-
-            $deviceIdent = 'BPMDevice_' . $this->MakeSafeIdent($definition['device_code']);
-            $deviceCategoryId = @IPS_GetObjectIDByIdent($deviceIdent, $rootId);
+            $deviceCategoryId = @IPS_GetObjectIDByIdent('BPMDevice_' . $this->MakeSafeIdent($definition['device_code']), $rootId);
             if ($deviceCategoryId === false || $deviceCategoryId <= 0) {
                 continue;
             }
-
             $variableId = @IPS_GetObjectIDByIdent($this->GetImportedVariableIdent($definition['api_key']), $deviceCategoryId);
             if ($variableId === false || $variableId <= 0) {
                 continue;
             }
 
-            $variable = IPS_GetVariable($variableId);
             $raw = $this->CleanString((string) $data[$definition['api_key']]);
-            $type = (int) ($variable['VariableType'] ?? VARIABLETYPE_STRING);
+            if (($definition['transform'] ?? 'generic') === 'active_when_zero') {
+                if (is_numeric($raw)) {
+                    SetValue($variableId, ((int) $raw) === 0);
+                }
+                continue;
+            }
 
+            $variable = IPS_GetVariable($variableId);
+            $type = (int) ($variable['VariableType'] ?? VARIABLETYPE_STRING);
             if ($type === VARIABLETYPE_BOOLEAN) {
                 if (is_numeric($raw)) {
                     SetValue($variableId, ((int) $raw) !== 0);
                 }
             } elseif ($type === VARIABLETYPE_INTEGER) {
-                if (is_numeric(str_replace(',', '.', $raw))) {
-                    SetValue($variableId, (int) ((float) str_replace(',', '.', $raw)));
+                $normalized = str_replace(',', '.', $raw);
+                if (is_numeric($normalized)) {
+                    SetValue($variableId, (int) ((float) $normalized));
                 }
             } elseif ($type === VARIABLETYPE_FLOAT) {
                 $normalized = str_replace(',', '.', $raw);
@@ -476,7 +499,6 @@ class BayrolPoolManager5 extends IPSModule
         if ($handle === false) {
             throw new Exception('CSV konnte nicht gelesen werden: ' . $path);
         }
-
         flock($handle, LOCK_SH);
         $header = fgetcsv($handle, 0, ';');
         if (!is_array($header)) {
@@ -484,7 +506,6 @@ class BayrolPoolManager5 extends IPSModule
             fclose($handle);
             return [];
         }
-
         $rows = [];
         while (($data = fgetcsv($handle, 0, ';')) !== false) {
             $row = [];
@@ -535,65 +556,40 @@ class BayrolPoolManager5 extends IPSModule
         $host = trim($this->ReadPropertyString('Host'));
         $port = max(1, min(65535, $this->ReadPropertyInteger('Port')));
         $timeout = max(1, $this->ReadPropertyInteger('Timeout'));
-
         if ($host === '') {
             throw new Exception('Host is empty');
         }
-
         $url = 'http://' . $host . ':' . $port . '/cgi-bin/webgui.fcgi?sid=' . rawurlencode($this->CreateSid());
         $payload = json_encode(['get' => array_values($keys)]);
-
         if ($payload === false) {
             throw new Exception('JSON payload encoding failed');
         }
-
         $this->SendDebugMessage('API URL', $url);
         $this->SendDebugMessage('API Payload', $payload);
-
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => "Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n",
-                'content' => $payload,
-                'timeout' => $timeout,
-                'ignore_errors' => true
-            ]
-        ]);
-
+        $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: application/json;charset=UTF-8\r\nAccept: application/json\r\n", 'content' => $payload, 'timeout' => $timeout, 'ignore_errors' => true]]);
         $started = microtime(true);
         $raw = @file_get_contents($url, false, $context);
         $durationMs = (int) round((microtime(true) - $started) * 1000);
         $headers = $http_response_header ?? [];
         $httpCode = $this->ExtractHttpCode($headers);
-
         if ($raw === false) {
             throw new Exception('HTTP request failed');
         }
-
         $this->SendDebugMessage('HTTP Code', (string) $httpCode);
         $this->SendDebugMessage('API Duration', $durationMs . ' ms');
         $this->SendDebugMessage('API Raw', (string) $raw);
-
         if ($httpCode !== 0 && ($httpCode < 200 || $httpCode >= 300)) {
             throw new Exception('HTTP error ' . $httpCode);
         }
-
         $json = json_decode((string) $raw, true);
         if (!is_array($json)) {
             throw new Exception('Invalid JSON response');
         }
-
         $apiStatus = (int) ($json['status']['code'] ?? -1);
         if ($apiStatus !== 0) {
             throw new Exception('API status code ' . $apiStatus);
         }
-
-        $json['_meta'] = [
-            'duration_ms' => $durationMs,
-            'http_code' => $httpCode,
-            'requested_keys' => count($keys)
-        ];
-
+        $json['_meta'] = ['duration_ms' => $durationMs, 'http_code' => $httpCode, 'requested_keys' => count($keys)];
         return $json;
     }
 
