@@ -50,6 +50,7 @@ class BayrolDiscovery extends IPSModule
             $this->SetValueSafe('StorageStatus', 'CSV Storage bereit. Schema v' . self::SCHEMA_VERSION);
             $this->SetValueSafe('StoragePath', $this->GetStorageDirectory());
             $this->SetValueSafe('StorageSchemaVersion', self::SCHEMA_VERSION);
+            $this->SetValueSafe('ScanSummary', $this->BuildScanSummary());
             $this->SetStatus(self::STATUS_ACTIVE);
         } catch (Throwable $e) {
             $this->SetValueSafe('StorageReady', false);
@@ -76,7 +77,7 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'ScanMaxKeys', 'caption' => 'Maximale Keys pro Scan'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanBatchSize', 'caption' => 'Batchgroesse'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKey', 'caption' => 'API-Key (Fallback/manuell)'],
-                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Ausgewaehlter Device-Code']
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Device-Code (Fallback/manuell)']
             ],
             'actions' => [
                 ['type' => 'Label', 'caption' => 'CSV-Pfad: ' . $this->GetStorageDirectory()],
@@ -93,7 +94,8 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
-                ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetails($id);'],
+                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Device Details verwenden direkt die markierte Zeile.'],
+                ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetailsFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 $this->GetDeviceListDefinition()
             ],
             'status' => [
@@ -110,6 +112,7 @@ class BayrolDiscovery extends IPSModule
             $this->InitializeStorage();
             $message = 'CSV Storage OK. API-Keys: ' . count($this->ReadCsvAssoc('api_keys')) . ', Scans: ' . count($this->ReadCsvAssoc('scans')) . ', Observations: ' . count($this->ReadCsvAssoc('observations')) . ', Devices: ' . count($this->ReadCsvAssoc('devices')) . ', Schema: v' . self::SCHEMA_VERSION;
             $this->SetValueSafe('StorageStatus', $message);
+            $this->SetValueSafe('ScanSummary', $this->BuildScanSummary());
             $this->SetStatus(self::STATUS_ACTIVE);
             return $message;
         } catch (Throwable $e) {
@@ -193,6 +196,7 @@ class BayrolDiscovery extends IPSModule
             $this->SetValueSafe('LastScanFoundKeys', $found);
             $this->SetValueSafe('LastResponseTimeMs', $duration);
             $this->SetValueSafe('LastError', '');
+            $this->SetValueSafe('ScanSummary', $this->BuildScanSummary());
             $this->UpdateBrowserFormList($this->BuildBrowserRows());
             $this->UpdateDeviceFormList($this->BuildDeviceRows());
             $this->SetStatus(self::STATUS_ACTIVE);
@@ -207,7 +211,7 @@ class BayrolDiscovery extends IPSModule
     public function GetScanSummary(): string
     {
         try {
-            $message = 'Scans: ' . count($this->ReadCsvAssoc('scans')) . ', API-Keys: ' . count($this->ReadCsvAssoc('api_keys')) . ', Beobachtungen: ' . count($this->ReadCsvAssoc('observations')) . ', Devices: ' . count($this->ReadCsvAssoc('devices'));
+            $message = $this->BuildScanSummary();
             $this->SetValueSafe('ScanSummary', $message);
             return $message;
         } catch (Throwable $e) { return 'Zusammenfassungsfehler: ' . $e->getMessage(); }
@@ -285,8 +289,13 @@ class BayrolDiscovery extends IPSModule
 
     public function LoadDeviceDetails(): string
     {
-        $code = trim($this->ReadPropertyString('SelectedDeviceCode'));
-        if ($code === '') { return 'Kein Device-Code ausgewaehlt.'; }
+        return $this->LoadDeviceDetailsFor($this->ReadPropertyString('SelectedDeviceCode'));
+    }
+
+    public function LoadDeviceDetailsFor(string $code): string
+    {
+        $code = trim($code);
+        if ($code === '') { return 'Keine Device-Zeile ausgewaehlt.'; }
         $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
         if (!isset($devices[$code])) { return 'Device nicht gefunden: ' . $code; }
         $keys = array_values(array_filter($this->ReadCsvAssoc('device_keys'), static function ($r) use ($code) { return ($r['device_code'] ?? '') === $code; }));
@@ -389,6 +398,11 @@ class BayrolDiscovery extends IPSModule
         $rows = [];
         foreach ($this->ReadCsvAssoc('devices') as $d) { $code = $d['code'] ?? ''; $rows[] = ['code' => $code, 'name' => $d['name'] ?? '', 'device_type' => $d['device_type'] ?? '', 'confidence' => $d['confidence'] ?? '', 'key_count' => (string) ($counts[$code] ?? 0), 'status_key' => $d['status_key'] ?? '']; }
         return $rows;
+    }
+
+    private function BuildScanSummary(): string
+    {
+        return 'Scans: ' . count($this->ReadCsvAssoc('scans')) . ', API-Keys: ' . count($this->ReadCsvAssoc('api_keys')) . ', Beobachtungen: ' . count($this->ReadCsvAssoc('observations')) . ', Devices: ' . count($this->ReadCsvAssoc('devices'));
     }
 
     private function UpdateBrowserFormList(array $rows): void { $this->UpdateFormField('BrowserList', 'values', json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'); }
