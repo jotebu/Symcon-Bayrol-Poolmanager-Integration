@@ -63,11 +63,13 @@ class BayrolPoolManager5 extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'UpdateInterval', 'caption' => 'Aktualisierungsintervall in Sekunden'],
                 ['type' => 'NumberSpinner', 'name' => 'Timeout', 'caption' => 'HTTP Timeout in Sekunden'],
                 ['type' => 'CheckBox', 'name' => 'DebugMode', 'caption' => 'Erweiterte Debug-Ausgaben'],
-                ['type' => 'Label', 'caption' => 'Discovery und Reverse Engineering erfolgen ausschließlich im separaten BayrolDiscovery-Modul.']
+                ['type' => 'Label', 'caption' => 'Discovery und Reverse Engineering erfolgen ausschliesslich im separaten BayrolDiscovery-Modul.'],
+                ['type' => 'Label', 'caption' => 'Discovery-Import liest lokal aus: ' . $this->GetDiscoveryStorageDirectory()]
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPM_TestConnection($id) ? "Verbindung erfolgreich." : "Verbindung fehlgeschlagen. Siehe Status und Debug-Ausgabe.";'],
-                ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";']
+                ['type' => 'Button', 'caption' => 'Werte jetzt aktualisieren', 'onClick' => 'BPM_UpdateValues($id); echo "Aktualisierung ausgefuehrt. Siehe Variablen, Status und Debug-Ausgabe.";'],
+                ['type' => 'Button', 'caption' => 'Discovery-Import anwenden', 'onClick' => 'echo BPM_ImportDiscovery($id);']
             ],
             'status' => [
                 ['code' => self::STATUS_ACTIVE, 'icon' => 'active', 'caption' => 'Aktiv'],
@@ -100,12 +102,68 @@ class BayrolPoolManager5 extends IPSModule
         }
     }
 
+    public function ImportDiscovery(): string
+    {
+        try {
+            $definitions = $this->LoadDiscoveryDefinitions();
+            if (count($definitions) === 0) {
+                $message = 'Discovery-Import: Keine API-Keys fuer Gateway-Import aktiviert.';
+                $this->SetValueSafe('DiscoveryImportStatus', $message);
+                return $message;
+            }
+
+            $rootId = $this->EnsureCategory($this->InstanceID, 'BPMDiscoveryImport', 'Discovery Import', 500);
+            $created = 0;
+            $reused = 0;
+            $renamed = 0;
+            $typeConflicts = 0;
+            $positionByDevice = [];
+
+            foreach ($definitions as $definition) {
+                $deviceCode = $definition['device_code'];
+                $deviceName = $definition['device_name'];
+                $deviceCategoryId = $this->EnsureCategory(
+                    $rootId,
+                    'BPMDevice_' . $this->MakeSafeIdent($deviceCode),
+                    $deviceName,
+                    10
+                );
+
+                $positionByDevice[$deviceCode] = ($positionByDevice[$deviceCode] ?? 0) + 10;
+                $result = $this->EnsureImportedVariable($deviceCategoryId, $definition, $positionByDevice[$deviceCode]);
+                if ($result === 'created') {
+                    $created++;
+                } elseif ($result === 'renamed') {
+                    $renamed++;
+                } elseif ($result === 'type_conflict') {
+                    $typeConflicts++;
+                } else {
+                    $reused++;
+                }
+            }
+
+            $message = 'Discovery-Import angewendet. Aktiviert: ' . count($definitions) . ', neu: ' . $created . ', vorhanden: ' . $reused . ', umbenannt: ' . $renamed . ', Typkonflikte: ' . $typeConflicts . '.';
+            $this->SetValueSafe('DiscoveryImportStatus', $message);
+            $this->SetValueSafe('DiscoveryImportedKeys', count($definitions));
+            return $message;
+        } catch (Throwable $e) {
+            $message = 'Discovery-Import Fehler: ' . $e->getMessage();
+            $this->SetValueSafe('DiscoveryImportStatus', $message);
+            return $message;
+        }
+    }
+
     public function UpdateValues(): void
     {
-        $keys = array_values(self::API_KEYS);
-        $this->SendDebugMessage('UpdateValues', 'Reading ' . count($keys) . ' keys');
-
         try {
+            $discoveryDefinitions = $this->LoadDiscoveryDefinitionsSafe();
+            $keys = array_values(self::API_KEYS);
+            foreach ($discoveryDefinitions as $definition) {
+                $keys[] = $definition['api_key'];
+            }
+            $keys = array_values(array_unique($keys));
+
+            $this->SendDebugMessage('UpdateValues', 'Reading ' . count($keys) . ' keys');
             $response = $this->ApiGet($keys);
             $data = $response['data'] ?? [];
 
@@ -122,6 +180,7 @@ class BayrolPoolManager5 extends IPSModule
             $this->SetValueSafe('ReceivedDataPoints', count($data));
 
             $this->UpdateKnownVariables($data);
+            $this->UpdateImportedVariables($data, $discoveryDefinitions);
             $this->SetStatus(self::STATUS_ACTIVE);
         } catch (Throwable $e) {
             $this->HandleError('UpdateValues', $e);
@@ -151,6 +210,8 @@ class BayrolPoolManager5 extends IPSModule
         $this->RegisterVariableInteger('ResponseTimeMs', 'API Antwortzeit', 'BPM.Milliseconds', 204);
         $this->RegisterVariableInteger('ReceivedDataPoints', 'Empfangene Datenpunkte', '', 205);
         $this->RegisterVariableString('LastError', 'Letzter Fehler', '', 206);
+        $this->RegisterVariableString('DiscoveryImportStatus', 'Discovery Import Status', '', 220);
+        $this->RegisterVariableInteger('DiscoveryImportedKeys', 'Discovery Importierte Keys', '', 221);
     }
 
     private function CreateProfiles(): void
@@ -226,6 +287,247 @@ class BayrolPoolManager5 extends IPSModule
         $filterText = $this->CleanString((string) ($data[self::API_KEYS['FilterPumpText']] ?? ''));
         $this->SetValueSafe('FilterPumpText', $filterText);
         $this->SetValueSafe('FilterPumpDetailedMode', $this->ParseFilterDetailedMode($filterText));
+    }
+
+    private function LoadDiscoveryDefinitionsSafe(): array
+    {
+        try {
+            return $this->LoadDiscoveryDefinitions();
+        } catch (Throwable $e) {
+            $this->SendDebugMessage('Discovery Import', $e->getMessage());
+            return [];
+        }
+    }
+
+    private function LoadDiscoveryDefinitions(): array
+    {
+        $directory = $this->GetDiscoveryStorageDirectory();
+        $apiPath = $directory . DIRECTORY_SEPARATOR . 'api_keys.csv';
+        $deviceKeysPath = $directory . DIRECTORY_SEPARATOR . 'device_keys.csv';
+        $devicesPath = $directory . DIRECTORY_SEPARATOR . 'devices.csv';
+
+        if (!is_file($apiPath)) {
+            throw new Exception('api_keys.csv nicht gefunden: ' . $apiPath);
+        }
+        if (!is_file($deviceKeysPath)) {
+            throw new Exception('device_keys.csv nicht gefunden: ' . $deviceKeysPath);
+        }
+
+        $apiRows = $this->ReadCsvAssocFile($apiPath);
+        $deviceKeyRows = $this->ReadCsvAssocFile($deviceKeysPath);
+        $deviceRows = is_file($devicesPath) ? $this->ReadCsvAssocFile($devicesPath) : [];
+
+        $devices = [];
+        foreach ($deviceRows as $row) {
+            $code = trim((string) ($row['code'] ?? ''));
+            if ($code !== '') {
+                $devices[$code] = $row;
+            }
+        }
+
+        $deviceByKey = [];
+        $roleByKey = [];
+        foreach ($deviceKeyRows as $row) {
+            $apiKey = trim((string) ($row['api_key'] ?? ''));
+            if ($apiKey === '') {
+                continue;
+            }
+            $deviceByKey[$apiKey] = trim((string) ($row['device_code'] ?? ''));
+            $roleByKey[$apiKey] = trim((string) ($row['role'] ?? ''));
+        }
+
+        $definitions = [];
+        foreach ($apiRows as $row) {
+            if (($row['gateway_import_enabled'] ?? '0') !== '1') {
+                continue;
+            }
+
+            $apiKey = trim((string) ($row['api_key'] ?? ''));
+            if ($apiKey === '') {
+                continue;
+            }
+
+            $deviceCode = $deviceByKey[$apiKey] ?? 'unassigned';
+            if ($deviceCode === '') {
+                $deviceCode = 'unassigned';
+            }
+            $deviceName = trim((string) ($devices[$deviceCode]['name'] ?? ''));
+            if ($deviceName === '') {
+                $deviceName = $deviceCode === 'unassigned' ? 'Nicht zugeordnet' : $deviceCode;
+            }
+
+            $customName = trim((string) ($row['gateway_variable_name'] ?? ''));
+            $suggestedName = trim((string) ($row['suggested_name'] ?? ''));
+            $variableName = $customName !== '' ? $customName : ($suggestedName !== '' ? $suggestedName : $apiKey);
+
+            $definitions[] = [
+                'api_key' => $apiKey,
+                'variable_name' => $variableName,
+                'value_type' => trim((string) ($row['value_type'] ?? 'string')),
+                'device_code' => $deviceCode,
+                'device_name' => $deviceName,
+                'role' => $roleByKey[$apiKey] ?? '',
+                'confidence' => trim((string) ($row['confidence'] ?? ''))
+            ];
+        }
+
+        usort($definitions, static function (array $a, array $b): int {
+            $deviceCompare = strcmp($a['device_code'], $b['device_code']);
+            return $deviceCompare !== 0 ? $deviceCompare : strcmp($a['api_key'], $b['api_key']);
+        });
+
+        return $definitions;
+    }
+
+    private function EnsureImportedVariable(int $parentId, array $definition, int $position): string
+    {
+        $ident = $this->GetImportedVariableIdent($definition['api_key']);
+        $expectedType = $this->MapDiscoveryTypeToSymconType($definition['value_type']);
+        $variableId = @IPS_GetObjectIDByIdent($ident, $parentId);
+
+        if ($variableId === false || $variableId <= 0) {
+            $variableId = IPS_CreateVariable($expectedType);
+            IPS_SetParent($variableId, $parentId);
+            IPS_SetIdent($variableId, $ident);
+            IPS_SetName($variableId, $definition['variable_name']);
+            IPS_SetPosition($variableId, $position);
+            IPS_SetInfo($variableId, 'Bayrol Discovery API-Key: ' . $definition['api_key'] . '; Rolle: ' . $definition['role']);
+            return 'created';
+        }
+
+        $variable = IPS_GetVariable($variableId);
+        if ((int) ($variable['VariableType'] ?? -1) !== $expectedType) {
+            return 'type_conflict';
+        }
+
+        IPS_SetPosition($variableId, $position);
+        IPS_SetInfo($variableId, 'Bayrol Discovery API-Key: ' . $definition['api_key'] . '; Rolle: ' . $definition['role']);
+        $object = IPS_GetObject($variableId);
+        if (($object['ObjectName'] ?? '') !== $definition['variable_name']) {
+            IPS_SetName($variableId, $definition['variable_name']);
+            return 'renamed';
+        }
+
+        return 'reused';
+    }
+
+    private function UpdateImportedVariables(array $data, array $definitions): void
+    {
+        $rootId = @IPS_GetObjectIDByIdent('BPMDiscoveryImport', $this->InstanceID);
+        if ($rootId === false || $rootId <= 0) {
+            return;
+        }
+
+        foreach ($definitions as $definition) {
+            if (!array_key_exists($definition['api_key'], $data)) {
+                continue;
+            }
+
+            $deviceIdent = 'BPMDevice_' . $this->MakeSafeIdent($definition['device_code']);
+            $deviceCategoryId = @IPS_GetObjectIDByIdent($deviceIdent, $rootId);
+            if ($deviceCategoryId === false || $deviceCategoryId <= 0) {
+                continue;
+            }
+
+            $variableId = @IPS_GetObjectIDByIdent($this->GetImportedVariableIdent($definition['api_key']), $deviceCategoryId);
+            if ($variableId === false || $variableId <= 0) {
+                continue;
+            }
+
+            $variable = IPS_GetVariable($variableId);
+            $raw = $this->CleanString((string) $data[$definition['api_key']]);
+            $type = (int) ($variable['VariableType'] ?? VARIABLETYPE_STRING);
+
+            if ($type === VARIABLETYPE_BOOLEAN) {
+                if (is_numeric($raw)) {
+                    SetValue($variableId, ((int) $raw) !== 0);
+                }
+            } elseif ($type === VARIABLETYPE_INTEGER) {
+                if (is_numeric(str_replace(',', '.', $raw))) {
+                    SetValue($variableId, (int) ((float) str_replace(',', '.', $raw)));
+                }
+            } elseif ($type === VARIABLETYPE_FLOAT) {
+                $normalized = str_replace(',', '.', $raw);
+                if (is_numeric($normalized)) {
+                    SetValue($variableId, (float) $normalized);
+                }
+            } else {
+                SetValue($variableId, $raw);
+            }
+        }
+    }
+
+    private function EnsureCategory(int $parentId, string $ident, string $name, int $position): int
+    {
+        $categoryId = @IPS_GetObjectIDByIdent($ident, $parentId);
+        if ($categoryId === false || $categoryId <= 0) {
+            $categoryId = IPS_CreateCategory();
+            IPS_SetParent($categoryId, $parentId);
+            IPS_SetIdent($categoryId, $ident);
+        }
+        IPS_SetName($categoryId, $name);
+        IPS_SetPosition($categoryId, $position);
+        return $categoryId;
+    }
+
+    private function ReadCsvAssocFile(string $path): array
+    {
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            throw new Exception('CSV konnte nicht gelesen werden: ' . $path);
+        }
+
+        flock($handle, LOCK_SH);
+        $header = fgetcsv($handle, 0, ';');
+        if (!is_array($header)) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            return [];
+        }
+
+        $rows = [];
+        while (($data = fgetcsv($handle, 0, ';')) !== false) {
+            $row = [];
+            foreach ($header as $index => $key) {
+                $row[$key] = $data[$index] ?? '';
+            }
+            if (implode('', $row) !== '') {
+                $rows[] = $row;
+            }
+        }
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        return $rows;
+    }
+
+    private function MapDiscoveryTypeToSymconType(string $valueType): int
+    {
+        if ($valueType === 'float') {
+            return VARIABLETYPE_FLOAT;
+        }
+        if ($valueType === 'integer') {
+            return VARIABLETYPE_INTEGER;
+        }
+        if ($valueType === 'boolean-candidate') {
+            return VARIABLETYPE_BOOLEAN;
+        }
+        return VARIABLETYPE_STRING;
+    }
+
+    private function GetImportedVariableIdent(string $apiKey): string
+    {
+        return 'BPMImport_' . substr(sha1($apiKey), 0, 20);
+    }
+
+    private function MakeSafeIdent(string $value): string
+    {
+        $safe = preg_replace('/[^A-Za-z0-9_]/', '_', $value);
+        return $safe !== null && $safe !== '' ? $safe : 'unknown';
+    }
+
+    private function GetDiscoveryStorageDirectory(): string
+    {
+        return rtrim(IPS_GetKernelDir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'user' . DIRECTORY_SEPARATOR . 'BayrolDiscovery';
     }
 
     private function ApiGet(array $keys): array
