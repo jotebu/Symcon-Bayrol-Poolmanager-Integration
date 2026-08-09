@@ -7,12 +7,12 @@ class BayrolDiscovery extends IPSModule
     private const STATUS_ACTIVE = 102;
     private const STATUS_STORAGE_ERROR = 202;
     private const STATUS_API_ERROR = 203;
-    private const SCHEMA_VERSION = 2;
+    private const SCHEMA_VERSION = 3;
 
     private const CSV_FILES = [
         'meta' => ['key', 'value'],
         'scans' => ['scan_id', 'started_at', 'finished_at', 'host', 'port', 'generated_keys', 'found_keys', 'duration_ms', 'notes'],
-        'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id', 'comment'],
+        'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id', 'comment', 'gateway_variable_name'],
         'observations' => ['scan_id', 'api_key', 'value', 'value_type', 'observed_at'],
         'devices' => ['code', 'name', 'device_type', 'confidence', 'status_key', 'value_key', 'first_seen', 'last_seen'],
         'device_keys' => ['device_code', 'api_key', 'role', 'is_required', 'direction'],
@@ -37,6 +37,7 @@ class BayrolDiscovery extends IPSModule
         $this->RegisterPropertyInteger('ScanBatchSize', 50);
         $this->RegisterPropertyString('SelectedApiKey', '');
         $this->RegisterPropertyString('SelectedApiKeyComment', '');
+        $this->RegisterPropertyString('SelectedGatewayVariableName', '');
         $this->RegisterPropertyString('SelectedDeviceCode', '');
     }
 
@@ -85,17 +86,20 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Verbindung testen', 'onClick' => 'echo BPD_TestConnection($id);'],
                 ['type' => 'Button', 'caption' => 'Scan starten', 'onClick' => 'echo BPD_RunScan($id);'],
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
-                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0: Der eingebaute Schnellfilter durchsucht API-Key, Name, Wert, Typ, Vertrauen, Device und Kommentar.'],
+                ['type' => 'Label', 'caption' => 'API-Key Browser 2.0: Schnellfilter durchsucht API-Key, Name, Gateway-Name, Wert, Typ, Vertrauen, Device und Kommentar.'],
                 ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
-                ['type' => 'Label', 'caption' => 'Zeile im Browser markieren; Details, Kommentar und Favorit verwenden direkt diese Zeile.'],
+                ['type' => 'Label', 'caption' => 'Zeile markieren; Details, Kommentar, Gateway-Variablenname und Favorit verwenden direkt diese Zeile.'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetailsFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKeyComment', 'caption' => 'Kommentar fuer markierte Zeile'],
                 ['type' => 'Button', 'caption' => 'Kommentar speichern', 'onClick' => 'echo BPD_SaveApiKeyCommentFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedApiKeyComment);'],
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedGatewayVariableName', 'caption' => 'Gateway-Variablenname fuer markierte Zeile'],
+                ['type' => 'Button', 'caption' => 'Gateway-Variablenname speichern', 'onClick' => 'echo BPD_SaveGatewayVariableNameFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedGatewayVariableName);'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
-                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Device Details verwenden direkt die markierte Zeile.'],
+                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Details und Export-Vorschau verwenden direkt die markierte Zeile.'],
                 ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetailsFor($id, (string) ($DeviceList["code"] ?? ""));'],
+                ['type' => 'Button', 'caption' => 'Device Export-Vorschau', 'onClick' => 'echo BPD_PreviewDeviceExportFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 $this->GetDeviceListDefinition()
             ],
             'status' => [
@@ -171,7 +175,8 @@ class BayrolDiscovery extends IPSModule
                         'first_seen' => $existing['first_seen'] ?? $started,
                         'last_seen' => $started,
                         'last_scan_id' => (string) $scanId,
-                        'comment' => $existing['comment'] ?? ''
+                        'comment' => $existing['comment'] ?? '',
+                        'gateway_variable_name' => $existing['gateway_variable_name'] ?? ''
                     ];
                     $observations[] = ['scan_id' => (string) $scanId, 'api_key' => (string) $key, 'value' => $clean, 'value_type' => $type, 'observed_at' => $started];
                     $this->ClassifyDevice((string) $key, $started, $devices, $deviceKeys);
@@ -250,7 +255,7 @@ class BayrolDiscovery extends IPSModule
         $history = array_slice(array_reverse($historyAll), 0, 12);
         $lines = [];
         foreach ($history as $h) { $lines[] = ($h['observed_at'] ?? '') . ' | Scan ' . ($h['scan_id'] ?? '') . ' | ' . ($h['value'] ?? '') . ' | ' . ($h['value_type'] ?? ''); }
-        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nName: " . ($row['suggested_name'] ?? '') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
+        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nName: " . ($row['suggested_name'] ?? '') . "\nGateway-Variablenname: " . ($row['gateway_variable_name'] ?? '') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
         $this->SetValueSafe('SelectedApiKeyDetails', $detail);
         return $detail;
     }
@@ -268,7 +273,25 @@ class BayrolDiscovery extends IPSModule
         if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
         $apiKeys[$key]['comment'] = trim($comment);
         $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+        $this->UpdateBrowserFormList($this->BuildBrowserRows());
         return 'Kommentar gespeichert: ' . $key;
+    }
+
+    public function SaveGatewayVariableName(): string
+    {
+        return $this->SaveGatewayVariableNameFor($this->ReadPropertyString('SelectedApiKey'), $this->ReadPropertyString('SelectedGatewayVariableName'));
+    }
+
+    public function SaveGatewayVariableNameFor(string $key, string $name): string
+    {
+        $key = trim($key);
+        if ($key === '') { return 'Keine Browser-Zeile ausgewaehlt.'; }
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
+        $apiKeys[$key]['gateway_variable_name'] = trim($name);
+        $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+        $this->UpdateBrowserFormList($this->BuildBrowserRows());
+        return 'Gateway-Variablenname gespeichert: ' . $key . ' -> ' . (trim($name) !== '' ? trim($name) : '[Vorschlagsname]');
     }
 
     public function ToggleFavorite(): string
@@ -284,6 +307,7 @@ class BayrolDiscovery extends IPSModule
         if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
         $apiKeys[$key]['is_favorite'] = (($apiKeys[$key]['is_favorite'] ?? '0') === '1') ? '0' : '1';
         $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+        $this->UpdateBrowserFormList($this->BuildBrowserRows());
         return 'Favorit umgeschaltet: ' . $key;
     }
 
@@ -311,6 +335,30 @@ class BayrolDiscovery extends IPSModule
         return $detail;
     }
 
+    public function PreviewDeviceExportFor(string $code): string
+    {
+        $code = trim($code);
+        if ($code === '') { return 'Keine Device-Zeile ausgewaehlt.'; }
+        $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
+        if (!isset($devices[$code])) { return 'Device nicht gefunden: ' . $code; }
+        $keys = array_values(array_filter($this->ReadCsvAssoc('device_keys'), static function ($r) use ($code) { return ($r['device_code'] ?? '') === $code; }));
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        $lines = [];
+        foreach ($keys as $k) {
+            $apiKey = $k['api_key'] ?? '';
+            $api = $apiKeys[$apiKey] ?? [];
+            $explicitName = trim((string) ($api['gateway_variable_name'] ?? ''));
+            $suggestedName = trim((string) ($api['suggested_name'] ?? ''));
+            $variableName = $explicitName !== '' ? $explicitName : ($suggestedName !== '' ? $suggestedName : $apiKey);
+            $source = $explicitName !== '' ? 'benutzerdefiniert' : ($suggestedName !== '' ? 'Vorschlag' : 'API-Key');
+            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . $apiKey . ' | Variable: ' . $variableName . ' [' . $source . '] | Typ: ' . ($api['value_type'] ?? '') . ' | Wert: ' . ($api['current_value'] ?? '');
+        }
+        $d = $devices[$code];
+        $preview = 'Gateway Export-Vorschau' . "\nDevice: " . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\n\nVariablen:\n" . implode("\n", $lines);
+        $this->SetValueSafe('DeviceExportPreview', $preview);
+        return $preview;
+    }
+
     private function RegisterVariables(): void
     {
         $this->RegisterVariableBoolean('StorageReady', 'CSV Storage bereit', '~Switch', 10);
@@ -329,6 +377,7 @@ class BayrolDiscovery extends IPSModule
         $this->RegisterVariableString('BrowserSummary', 'Browser Zusammenfassung', '', 300);
         $this->RegisterVariableString('SelectedApiKeyDetails', 'API-Key Details', '', 310);
         $this->RegisterVariableString('SelectedDeviceDetails', 'Device Details', '', 410);
+        $this->RegisterVariableString('DeviceExportPreview', 'Device Export Vorschau', '', 420);
     }
 
     private function GetApiKeyListDefinition(): array
@@ -337,15 +386,16 @@ class BayrolDiscovery extends IPSModule
             'columns' => [
                 ['name' => 'favorite', 'caption' => 'Fav', 'width' => '45px', 'add' => '', 'edit' => false],
                 ['name' => 'confidence', 'caption' => 'Vertrauen', 'width' => '80px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'api_key', 'caption' => 'API-Key', 'width' => '200px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'suggested_name', 'caption' => 'Name', 'width' => '160px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'current_value', 'caption' => 'Wert', 'width' => '170px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'value_type', 'caption' => 'Typ', 'width' => '110px', 'add' => '', 'edit' => false, 'quickFilter' => true],
-                ['name' => 'device', 'caption' => 'Device', 'width' => '130px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'api_key', 'caption' => 'API-Key', 'width' => '180px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'suggested_name', 'caption' => 'Name', 'width' => '150px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'gateway_variable_name', 'caption' => 'Gateway-Name', 'width' => '170px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'current_value', 'caption' => 'Wert', 'width' => '150px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'value_type', 'caption' => 'Typ', 'width' => '100px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'device', 'caption' => 'Device', 'width' => '120px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'observations', 'caption' => 'Obs', 'width' => '60px', 'add' => '', 'edit' => false],
                 ['name' => 'first_seen', 'caption' => 'Erst gesehen', 'width' => '140px', 'add' => '', 'edit' => false],
                 ['name' => 'last_seen', 'caption' => 'Zuletzt', 'width' => '140px', 'add' => '', 'edit' => false],
-                ['name' => 'comment', 'caption' => 'Kommentar', 'width' => '220px', 'add' => '', 'edit' => false, 'quickFilter' => true]
+                ['name' => 'comment', 'caption' => 'Kommentar', 'width' => '200px', 'add' => '', 'edit' => false, 'quickFilter' => true]
             ], 'values' => $this->BuildBrowserRowsSafe()];
     }
 
@@ -378,6 +428,7 @@ class BayrolDiscovery extends IPSModule
                 'confidence' => $r['confidence'] ?? '',
                 'api_key' => $key,
                 'suggested_name' => $r['suggested_name'] ?? '',
+                'gateway_variable_name' => $r['gateway_variable_name'] ?? '',
                 'current_value' => $r['current_value'] ?? '',
                 'value_type' => $r['value_type'] ?? '',
                 'device' => $device,
