@@ -110,6 +110,11 @@ class BayrolDiscovery extends IPSModule
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
                 ['type' => 'Label', 'caption' => 'Manuelle Device-Zuordnungen haben Vorrang vor der automatischen Klassifizierung.'],
+                ['type' => 'Label', 'caption' => 'Device-Familie: Device markieren, Status-Key eingeben und gleiche Objekt-ID nach verwandten Keys durchsuchen.'],
+                ['type' => 'ValidationTextBox', 'name' => 'DeviceFamilyStatusKey', 'caption' => 'Status-Key, z.B. 55.17120.status'],
+                ['type' => 'Button', 'caption' => 'Status-Key setzen und Device-Familie suchen', 'onClick' => 'echo BPD_DiscoverDeviceFamilyFor($id, (string) ($DeviceList["code"] ?? ""), (string) $DeviceFamilyStatusKey);'],
+                ['type' => 'NumberSpinner', 'name' => 'DeviceNeighborRadius', 'caption' => 'Nachbarschafts-Radius Objekt-IDs', 'value' => 2],
+                ['type' => 'Button', 'caption' => 'Device-Nachbarschaft scannen', 'onClick' => 'echo BPD_DiscoverDeviceNeighborsFor($id, (string) ($DeviceList["code"] ?? ""), (string) $DeviceFamilyStatusKey, (int) $DeviceNeighborRadius);'],
                 ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetailsFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Device Export-Vorschau', 'onClick' => 'echo BPD_PreviewDeviceExportFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 $this->GetDeviceListDefinition()
@@ -283,6 +288,16 @@ class BayrolDiscovery extends IPSModule
         $rows = $this->BuildDeviceRows();
         $this->UpdateDeviceFormList($rows);
         return 'Device Browser geladen. Devices: ' . count($rows);
+    }
+
+    public function DiscoverDeviceFamilyFor(string $code, string $statusKey): string
+    {
+        return $this->DiscoverDeviceRangeFor($code, $statusKey, 0);
+    }
+
+    public function DiscoverDeviceNeighborsFor(string $code, string $statusKey, int $radius): string
+    {
+        return $this->DiscoverDeviceRangeFor($code, $statusKey, max(1, min(5, $radius)));
     }
 
     public function LoadApiKeyDetails(): string
@@ -473,6 +488,125 @@ class BayrolDiscovery extends IPSModule
         $preview = 'Gateway Export-Vorschau' . "\nDevice: " . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\nAktivierte Variablen: " . count($lines) . "\n\nVariablen:\n" . (count($lines) > 0 ? implode("\n", $lines) : '[keine fuer Gateway-Import aktiviert]');
         $this->SetValueSafe('DeviceExportPreview', $preview);
         return $preview;
+    }
+
+    private function DiscoverDeviceRangeFor(string $code, string $statusKey, int $radius): string
+    {
+        $code = trim($code);
+        $statusKey = trim($statusKey);
+        if ($code === '') { return 'Keine Device-Zeile ausgewaehlt.'; }
+        $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
+        if (!isset($devices[$code])) { return 'Device nicht gefunden: ' . $code; }
+        if (!preg_match('/^(\d+)\.(\d+)\.status$/', $statusKey, $match)) {
+            return 'Ungueltiger Status-Key. Erwartet wird z.B. 55.17120.status.';
+        }
+
+        $group = (int) $match[1];
+        $object = (int) $match[2];
+        $suffixes = array_values(array_unique(array_merge(['status', 'value', 'opmode', 'text1', 'text2'], $this->ParseSuffixes($this->ReadPropertyString('ScanSuffixes')))));
+        $keys = [];
+        for ($candidateObject = max(1, $object - $radius); $candidateObject <= $object + $radius; $candidateObject++) {
+            foreach ($suffixes as $suffix) {
+                $keys[] = $group . '.' . $candidateObject . '.' . $suffix;
+            }
+        }
+
+        try {
+            $response = $this->ApiGet($keys);
+            $data = is_array($response['data'] ?? null) ? $response['data'] : [];
+            if (!array_key_exists($statusKey, $data) || $this->CleanString((string) $data[$statusKey]) === '') {
+                return 'Status-Key wurde vom PM5 nicht geliefert: ' . $statusKey;
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+            $deviceKeys = $this->ReadCsvAssoc('device_keys');
+            $found = 0;
+            $assigned = 0;
+            $protected = 0;
+
+            foreach ($data as $apiKey => $value) {
+                $apiKey = (string) $apiKey;
+                $clean = $this->CleanString((string) $value);
+                if ($clean === '') { continue; }
+                $found++;
+
+                $manualDevice = $this->GetManualAssignmentDevice($apiKey, $deviceKeys);
+                if ($manualDevice !== '' && $manualDevice !== $code) {
+                    $protected++;
+                    continue;
+                }
+
+                $existing = $apiKeys[$apiKey] ?? [];
+                $apiKeys[$apiKey] = [
+                    'api_key' => $apiKey,
+                    'current_value' => $clean,
+                    'value_type' => $this->DetectValueType($clean),
+                    'confidence' => $existing['confidence'] ?? (string) $this->GetConfidence($apiKey),
+                    'suggested_name' => ($existing['suggested_name'] ?? '') !== '' ? $existing['suggested_name'] : $this->GetKnownName($apiKey),
+                    'is_favorite' => $existing['is_favorite'] ?? '0',
+                    'first_seen' => $existing['first_seen'] ?? $now,
+                    'last_seen' => $now,
+                    'last_scan_id' => $existing['last_scan_id'] ?? '',
+                    'comment' => $existing['comment'] ?? '',
+                    'gateway_variable_name' => $existing['gateway_variable_name'] ?? '',
+                    'gateway_import_enabled' => $existing['gateway_import_enabled'] ?? '0'
+                ];
+
+                $deviceKeys = array_values(array_filter($deviceKeys, static function ($row) use ($apiKey) {
+                    return ($row['api_key'] ?? '') !== $apiKey;
+                }));
+                $role = $this->GetRoleForSuffix($this->GetKeySuffix($apiKey));
+                $deviceKeys[] = [
+                    'device_code' => $code,
+                    'api_key' => $apiKey,
+                    'role' => $role,
+                    'is_required' => in_array($role, ['status', 'value', 'measurement'], true) ? '1' : '0',
+                    'direction' => 'read',
+                    'assignment_source' => 'manual'
+                ];
+                $assigned++;
+            }
+
+            $device = $devices[$code];
+            $device['status_key'] = $statusKey;
+            $device['confidence'] = '100';
+            $device['last_seen'] = $now;
+            $sameObjectValueKey = $group . '.' . $object . '.value';
+            if (isset($apiKeys[$sameObjectValueKey])) { $device['value_key'] = $sameObjectValueKey; }
+            $devices[$code] = $device;
+
+            $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+            $this->WriteCsvAssoc('devices', array_values($devices));
+            $this->WriteCsvAssoc('device_keys', $this->UniqueRows($deviceKeys, ['device_code', 'api_key']));
+            $this->UpdateBrowserFormList($this->BuildBrowserRows());
+            $this->UpdateDeviceFormList($this->BuildDeviceRows());
+            $this->SetValueSafe('ScanSummary', $this->BuildScanSummary());
+
+            $scope = $radius === 0 ? 'Device-Familie' : 'Device-Nachbarschaft Radius ' . $radius;
+            return $scope . ' abgeschlossen: ' . $code . ' | Status-Key: ' . $statusKey . ' | getestet: ' . count($keys) . ' | gefunden: ' . $found . ' | zugeordnet: ' . $assigned . ' | geschuetzt: ' . $protected . '.';
+        } catch (Throwable $e) {
+            return 'Device-Familienfehler: ' . $e->getMessage();
+        }
+    }
+
+    private function GetManualAssignmentDevice(string $apiKey, array $deviceKeys): string
+    {
+        foreach ($deviceKeys as $row) {
+            if (($row['api_key'] ?? '') === $apiKey && ($row['assignment_source'] ?? 'auto') === 'manual') {
+                return (string) ($row['device_code'] ?? '');
+            }
+        }
+        return '';
+    }
+
+    private function GetRoleForSuffix(string $suffix): string
+    {
+        if ($suffix === 'status') { return 'status'; }
+        if ($suffix === 'value') { return 'value'; }
+        if ($suffix === 'opmode') { return 'opmode'; }
+        if (strpos($suffix, 'text') === 0) { return 'info'; }
+        return 'info';
     }
 
     private function RegisterVariables(): void
