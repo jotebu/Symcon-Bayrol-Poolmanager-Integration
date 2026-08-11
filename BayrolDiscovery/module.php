@@ -82,12 +82,7 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'ScanMaxKeys', 'caption' => 'Maximale Keys pro Scan'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanBatchSize', 'caption' => 'Batchgroesse'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKey', 'caption' => 'API-Key (Fallback/manuell)'],
-                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Device-Code (Fallback/manuell)'],
-                ['type' => 'Label', 'caption' => 'Manuelle Device-Zuordnung: markierten API-Key testen und einem bestehenden oder neuen Device zuordnen.'],
-                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceCode', 'caption' => 'Neuer/bestehender Device-Code'],
-                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceName', 'caption' => 'Device-Name'],
-                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceType', 'caption' => 'Device-Typ, z.B. sensor_group'],
-                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceRole', 'caption' => 'Rolle, z.B. measurement/status/value/info']
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Device-Code (Fallback/manuell)']
             ],
             'actions' => [
                 ['type' => 'Label', 'caption' => 'CSV-Pfad: ' . $this->GetStorageDirectory()],
@@ -106,6 +101,11 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Gateway-Variablenname speichern', 'onClick' => 'echo BPD_SaveGatewayVariableNameFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedGatewayVariableName);'],
                 ['type' => 'Button', 'caption' => 'Gateway-Import umschalten', 'onClick' => 'echo BPD_ToggleGatewayImportFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
+                ['type' => 'Label', 'caption' => 'Manuelle Device-Zuordnung: Werte eingeben und direkt zuordnen; Speichern der Instanzkonfiguration ist nicht erforderlich.'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceCode', 'caption' => 'Neuer/bestehender Device-Code'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceName', 'caption' => 'Device-Name'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceType', 'caption' => 'Device-Typ, z.B. sensor_group'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceRole', 'caption' => 'Rolle, z.B. measurement/status/value/info'],
                 ['type' => 'Button', 'caption' => 'API-Key Device manuell zuordnen', 'onClick' => 'echo BPD_AssignApiKeyToDeviceFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $ManualDeviceCode, (string) $ManualDeviceName, (string) $ManualDeviceType, (string) $ManualDeviceRole);'],
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
