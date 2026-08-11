@@ -7,7 +7,7 @@ class BayrolDiscovery extends IPSModule
     private const STATUS_ACTIVE = 102;
     private const STATUS_STORAGE_ERROR = 202;
     private const STATUS_API_ERROR = 203;
-    private const SCHEMA_VERSION = 4;
+    private const SCHEMA_VERSION = 5;
 
     private const CSV_FILES = [
         'meta' => ['key', 'value'],
@@ -15,7 +15,7 @@ class BayrolDiscovery extends IPSModule
         'api_keys' => ['api_key', 'current_value', 'value_type', 'confidence', 'suggested_name', 'is_favorite', 'first_seen', 'last_seen', 'last_scan_id', 'comment', 'gateway_variable_name', 'gateway_import_enabled'],
         'observations' => ['scan_id', 'api_key', 'value', 'value_type', 'observed_at'],
         'devices' => ['code', 'name', 'device_type', 'confidence', 'status_key', 'value_key', 'first_seen', 'last_seen'],
-        'device_keys' => ['device_code', 'api_key', 'role', 'is_required', 'direction'],
+        'device_keys' => ['device_code', 'api_key', 'role', 'is_required', 'direction', 'assignment_source'],
         'tags' => ['name', 'color', 'description'],
         'key_tags' => ['api_key', 'tag']
     ];
@@ -39,6 +39,10 @@ class BayrolDiscovery extends IPSModule
         $this->RegisterPropertyString('SelectedApiKeyComment', '');
         $this->RegisterPropertyString('SelectedGatewayVariableName', '');
         $this->RegisterPropertyString('SelectedDeviceCode', '');
+        $this->RegisterPropertyString('ManualDeviceCode', '');
+        $this->RegisterPropertyString('ManualDeviceName', '');
+        $this->RegisterPropertyString('ManualDeviceType', 'sensor_group');
+        $this->RegisterPropertyString('ManualDeviceRole', 'measurement');
     }
 
     public function ApplyChanges()
@@ -78,7 +82,12 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'ScanMaxKeys', 'caption' => 'Maximale Keys pro Scan'],
                 ['type' => 'NumberSpinner', 'name' => 'ScanBatchSize', 'caption' => 'Batchgroesse'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKey', 'caption' => 'API-Key (Fallback/manuell)'],
-                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Device-Code (Fallback/manuell)']
+                ['type' => 'ValidationTextBox', 'name' => 'SelectedDeviceCode', 'caption' => 'Device-Code (Fallback/manuell)'],
+                ['type' => 'Label', 'caption' => 'Manuelle Device-Zuordnung: markierten API-Key testen und einem bestehenden oder neuen Device zuordnen.'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceCode', 'caption' => 'Neuer/bestehender Device-Code'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceName', 'caption' => 'Device-Name'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceType', 'caption' => 'Device-Typ, z.B. sensor_group'],
+                ['type' => 'ValidationTextBox', 'name' => 'ManualDeviceRole', 'caption' => 'Rolle, z.B. measurement/status/value/info']
             ],
             'actions' => [
                 ['type' => 'Label', 'caption' => 'CSV-Pfad: ' . $this->GetStorageDirectory()],
@@ -88,7 +97,8 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Scan-Zusammenfassung laden', 'onClick' => 'echo BPD_GetScanSummary($id);'],
                 ['type' => 'Label', 'caption' => 'API-Key Browser 2.0: Schnellfilter durchsucht API-Key, Name, Gateway-Name, Importstatus, Wert, Typ, Vertrauen, Device und Kommentar.'],
                 ['type' => 'Button', 'caption' => 'API-Key Browser laden', 'onClick' => 'echo BPD_LoadBrowser($id);'],
-                ['type' => 'Label', 'caption' => 'Zeile markieren; Details, Kommentar, Gateway-Variablenname, Gateway-Import und Favorit verwenden direkt diese Zeile.'],
+                ['type' => 'Label', 'caption' => 'Zeile markieren; Details und Aktionen verwenden direkt diese Zeile.'],
+                ['type' => 'Button', 'caption' => 'API-Key jetzt testen', 'onClick' => 'echo BPD_TestApiKeyFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'API-Key Details laden', 'onClick' => 'echo BPD_LoadApiKeyDetailsFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'ValidationTextBox', 'name' => 'SelectedApiKeyComment', 'caption' => 'Kommentar fuer markierte Zeile'],
                 ['type' => 'Button', 'caption' => 'Kommentar speichern', 'onClick' => 'echo BPD_SaveApiKeyCommentFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedApiKeyComment);'],
@@ -96,9 +106,10 @@ class BayrolDiscovery extends IPSModule
                 ['type' => 'Button', 'caption' => 'Gateway-Variablenname speichern', 'onClick' => 'echo BPD_SaveGatewayVariableNameFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $SelectedGatewayVariableName);'],
                 ['type' => 'Button', 'caption' => 'Gateway-Import umschalten', 'onClick' => 'echo BPD_ToggleGatewayImportFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Favorit umschalten', 'onClick' => 'echo BPD_ToggleFavoriteFor($id, (string) ($BrowserList["api_key"] ?? ""));'],
+                ['type' => 'Button', 'caption' => 'API-Key Device manuell zuordnen', 'onClick' => 'echo BPD_AssignApiKeyToDeviceFor($id, (string) ($BrowserList["api_key"] ?? ""), (string) $ManualDeviceCode, (string) $ManualDeviceName, (string) $ManualDeviceType, (string) $ManualDeviceRole);'],
                 $this->GetApiKeyListDefinition(),
                 ['type' => 'Button', 'caption' => 'Device Browser laden', 'onClick' => 'echo BPD_LoadDevices($id);'],
-                ['type' => 'Label', 'caption' => 'Device-Zeile markieren; Details und Export-Vorschau verwenden direkt die markierte Zeile. Die Export-Vorschau enthaelt nur fuer den Gateway-Import aktivierte Keys.'],
+                ['type' => 'Label', 'caption' => 'Manuelle Device-Zuordnungen haben Vorrang vor der automatischen Klassifizierung.'],
                 ['type' => 'Button', 'caption' => 'Device Details laden', 'onClick' => 'echo BPD_LoadDeviceDetailsFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 ['type' => 'Button', 'caption' => 'Device Export-Vorschau', 'onClick' => 'echo BPD_PreviewDeviceExportFor($id, (string) ($DeviceList["code"] ?? ""));'],
                 $this->GetDeviceListDefinition()
@@ -142,6 +153,40 @@ class BayrolDiscovery extends IPSModule
             $this->SetValueSafe('LastError', $e->getMessage());
             $this->SetStatus(self::STATUS_API_ERROR);
             return 'Verbindungsfehler: ' . $e->getMessage();
+        }
+    }
+
+    public function TestApiKeyFor(string $key): string
+    {
+        $key = trim($key);
+        if ($key === '') { return 'Keine Browser-Zeile ausgewaehlt.'; }
+        try {
+            $response = $this->ApiGet([$key]);
+            if (!array_key_exists($key, $response['data'] ?? [])) { return 'API-Key nicht in Antwort enthalten: ' . $key; }
+            $clean = $this->CleanString((string) $response['data'][$key]);
+            $type = $this->DetectValueType($clean);
+            $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+            $existing = $apiKeys[$key] ?? [];
+            $now = date('Y-m-d H:i:s');
+            $apiKeys[$key] = [
+                'api_key' => $key,
+                'current_value' => $clean,
+                'value_type' => $type,
+                'confidence' => $existing['confidence'] ?? (string) $this->GetConfidence($key),
+                'suggested_name' => $existing['suggested_name'] ?? $this->GetKnownName($key),
+                'is_favorite' => $existing['is_favorite'] ?? '0',
+                'first_seen' => $existing['first_seen'] ?? $now,
+                'last_seen' => $now,
+                'last_scan_id' => $existing['last_scan_id'] ?? '',
+                'comment' => $existing['comment'] ?? '',
+                'gateway_variable_name' => $existing['gateway_variable_name'] ?? '',
+                'gateway_import_enabled' => $existing['gateway_import_enabled'] ?? '0'
+            ];
+            $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
+            $this->UpdateBrowserFormList($this->BuildBrowserRows());
+            return 'API-Key getestet: ' . $key . ' | Wert: ' . $clean . ' | Typ: ' . $type;
+        } catch (Throwable $e) {
+            return 'API-Key Testfehler: ' . $e->getMessage();
         }
     }
 
@@ -253,11 +298,12 @@ class BayrolDiscovery extends IPSModule
         if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
         $row = $apiKeys[$key];
         $device = $this->GetDeviceForApiKey($key);
+        $source = $this->GetAssignmentSourceForApiKey($key);
         $historyAll = array_values(array_filter($this->ReadCsvAssoc('observations'), static function ($r) use ($key) { return ($r['api_key'] ?? '') === $key; }));
         $history = array_slice(array_reverse($historyAll), 0, 12);
         $lines = [];
         foreach ($history as $h) { $lines[] = ($h['observed_at'] ?? '') . ' | Scan ' . ($h['scan_id'] ?? '') . ' | ' . ($h['value'] ?? '') . ' | ' . ($h['value_type'] ?? ''); }
-        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nName: " . ($row['suggested_name'] ?? '') . "\nGateway-Variablenname: " . ($row['gateway_variable_name'] ?? '') . "\nGateway-Import: " . (($row['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
+        $detail = 'API-Key: ' . $key . "\nDevice: " . $device . "\nZuordnung: " . $source . "\nName: " . ($row['suggested_name'] ?? '') . "\nGateway-Variablenname: " . ($row['gateway_variable_name'] ?? '') . "\nGateway-Import: " . (($row['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . "\nWert: " . ($row['current_value'] ?? '') . "\nTyp: " . ($row['value_type'] ?? '') . "\nVertrauen: " . ($row['confidence'] ?? '') . "\nFavorit: " . (($row['is_favorite'] ?? '0') === '1' ? 'ja' : 'nein') . "\nErst gesehen: " . ($row['first_seen'] ?? '') . "\nZuletzt gesehen: " . ($row['last_seen'] ?? '') . "\nBeobachtungen: " . count($historyAll) . "\nKommentar: " . ($row['comment'] ?? '') . "\n\nLetzte Werte:\n" . implode("\n", $lines);
         $this->SetValueSafe('SelectedApiKeyDetails', $detail);
         return $detail;
     }
@@ -311,6 +357,7 @@ class BayrolDiscovery extends IPSModule
         $apiKeys[$key]['gateway_import_enabled'] = $enabled;
         $this->WriteCsvAssoc('api_keys', array_values($apiKeys));
         $this->UpdateBrowserFormList($this->BuildBrowserRows());
+        $this->UpdateDeviceFormList($this->BuildDeviceRows());
         return 'Gateway-Import ' . ($enabled === '1' ? 'aktiviert' : 'deaktiviert') . ': ' . $key;
     }
 
@@ -331,6 +378,54 @@ class BayrolDiscovery extends IPSModule
         return 'Favorit umgeschaltet: ' . $key;
     }
 
+    public function AssignApiKeyToDeviceFor(string $key, string $code, string $name, string $type, string $role): string
+    {
+        $key = trim($key);
+        $code = trim($code);
+        $name = trim($name);
+        $type = trim($type);
+        $role = trim($role);
+        if ($key === '') { return 'Keine Browser-Zeile ausgewaehlt.'; }
+        if ($code === '' || !preg_match('/^[A-Za-z0-9_\-]+$/', $code)) { return 'Ungueltiger Device-Code. Erlaubt: Buchstaben, Zahlen, _ und -.'; }
+        if ($name === '') { $name = $code; }
+        if ($type === '') { $type = 'sensor_group'; }
+        if ($role === '') { $role = 'measurement'; }
+
+        $apiKeys = $this->IndexBy($this->ReadCsvAssoc('api_keys'), 'api_key');
+        if (!isset($apiKeys[$key])) { return 'API-Key nicht gefunden: ' . $key; }
+        $now = date('Y-m-d H:i:s');
+        $devices = $this->IndexBy($this->ReadCsvAssoc('devices'), 'code');
+        $existing = $devices[$code] ?? [];
+        $devices[$code] = [
+            'code' => $code,
+            'name' => $name,
+            'device_type' => $type,
+            'confidence' => '100',
+            'status_key' => $role === 'status' ? $key : ($existing['status_key'] ?? ''),
+            'value_key' => in_array($role, ['value', 'measurement'], true) ? $key : ($existing['value_key'] ?? ''),
+            'first_seen' => $existing['first_seen'] ?? $now,
+            'last_seen' => $now
+        ];
+
+        $deviceKeys = array_values(array_filter($this->ReadCsvAssoc('device_keys'), static function ($row) use ($key) {
+            return ($row['api_key'] ?? '') !== $key;
+        }));
+        $deviceKeys[] = [
+            'device_code' => $code,
+            'api_key' => $key,
+            'role' => $role,
+            'is_required' => in_array($role, ['status', 'value', 'measurement'], true) ? '1' : '0',
+            'direction' => 'read',
+            'assignment_source' => 'manual'
+        ];
+
+        $this->WriteCsvAssoc('devices', array_values($devices));
+        $this->WriteCsvAssoc('device_keys', $this->UniqueRows($deviceKeys, ['device_code', 'api_key']));
+        $this->UpdateBrowserFormList($this->BuildBrowserRows());
+        $this->UpdateDeviceFormList($this->BuildDeviceRows());
+        return 'Manuelle Device-Zuordnung gespeichert: ' . $key . ' -> ' . $code . ' (' . $role . ').';
+    }
+
     public function LoadDeviceDetails(): string
     {
         return $this->LoadDeviceDetailsFor($this->ReadPropertyString('SelectedDeviceCode'));
@@ -347,7 +442,7 @@ class BayrolDiscovery extends IPSModule
         $lines = [];
         foreach ($keys as $k) {
             $api = $apiKeys[$k['api_key']] ?? [];
-            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . ($k['api_key'] ?? '') . ' | Import: ' . (($api['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . ' | ' . ($api['current_value'] ?? '') . ' | ' . ($api['value_type'] ?? '');
+            $lines[] = (($k['is_required'] ?? '0') === '1' ? 'Pflicht' : 'Optional') . ' | ' . ($k['role'] ?? '') . ' | ' . ($k['api_key'] ?? '') . ' | Zuordnung: ' . ($k['assignment_source'] ?? 'auto') . ' | Import: ' . (($api['gateway_import_enabled'] ?? '0') === '1' ? 'ja' : 'nein') . ' | ' . ($api['current_value'] ?? '') . ' | ' . ($api['value_type'] ?? '');
         }
         $d = $devices[$code];
         $detail = 'Device: ' . ($d['name'] ?? '') . "\nCode: " . $code . "\nTyp: " . ($d['device_type'] ?? '') . "\nVertrauen: " . ($d['confidence'] ?? '') . "\nStatus-Key: " . ($d['status_key'] ?? '') . "\nValue-Key: " . ($d['value_key'] ?? '') . "\n\nKeys:\n" . implode("\n", $lines);
@@ -414,6 +509,7 @@ class BayrolDiscovery extends IPSModule
                 ['name' => 'current_value', 'caption' => 'Wert', 'width' => '140px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'value_type', 'caption' => 'Typ', 'width' => '100px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'device', 'caption' => 'Device', 'width' => '120px', 'add' => '', 'edit' => false, 'quickFilter' => true],
+                ['name' => 'assignment_source', 'caption' => 'Zuordnung', 'width' => '80px', 'add' => '', 'edit' => false, 'quickFilter' => true],
                 ['name' => 'observations', 'caption' => 'Obs', 'width' => '60px', 'add' => '', 'edit' => false],
                 ['name' => 'first_seen', 'caption' => 'Erst gesehen', 'width' => '140px', 'add' => '', 'edit' => false],
                 ['name' => 'last_seen', 'caption' => 'Zuletzt', 'width' => '140px', 'add' => '', 'edit' => false],
@@ -442,10 +538,10 @@ class BayrolDiscovery extends IPSModule
     {
         $counts = $this->GetObservationCounts();
         $deviceByKey = $this->GetDeviceByKeyMap();
+        $sourceByKey = $this->GetAssignmentSourceByKeyMap();
         $rows = [];
         foreach ($this->ReadCsvAssoc('api_keys') as $r) {
             $key = $r['api_key'] ?? '';
-            $device = $deviceByKey[$key] ?? '';
             $rows[] = [
                 'favorite' => (($r['is_favorite'] ?? '0') === '1') ? 'ja' : '',
                 'gateway_import' => (($r['gateway_import_enabled'] ?? '0') === '1') ? 'ja' : '',
@@ -455,7 +551,8 @@ class BayrolDiscovery extends IPSModule
                 'gateway_variable_name' => $r['gateway_variable_name'] ?? '',
                 'current_value' => $r['current_value'] ?? '',
                 'value_type' => $r['value_type'] ?? '',
-                'device' => $device,
+                'device' => $deviceByKey[$key] ?? '',
+                'assignment_source' => $sourceByKey[$key] ?? '',
                 'observations' => (string) ($counts[$key] ?? 0),
                 'first_seen' => $r['first_seen'] ?? '',
                 'last_seen' => $r['last_seen'] ?? '',
@@ -582,17 +679,26 @@ class BayrolDiscovery extends IPSModule
 
     private function ClassifyDevice(string $key, string $now, array &$devices, array &$deviceKeys): void
     {
+        if ($this->HasManualAssignment($key, $deviceKeys)) { return; }
         if (strpos($key, '55.17106.') === 0) { $this->EnsureDevice('filter_pump', 'Filterpumpe', 'actuator', $key, $this->GetKeySuffix($key), $now, $devices, $deviceKeys); }
         if (strpos($key, '55.17102.') === 0) { $this->EnsureDevice('pool_light', 'Poollicht', 'actuator', $key, $this->GetKeySuffix($key), $now, $devices, $deviceKeys); }
         if (strpos($key, '34.') === 0) { $this->EnsureDevice('water_values', 'Wasserwerte', 'sensor_group', $key, 'measurement', $now, $devices, $deviceKeys); }
         if (strpos($key, '13.') === 0) { $this->EnsureDevice('system_values', 'Systemwerte', 'system_group', $key, 'info', $now, $devices, $deviceKeys); }
     }
 
+    private function HasManualAssignment(string $key, array $deviceKeys): bool
+    {
+        foreach ($deviceKeys as $row) {
+            if (($row['api_key'] ?? '') === $key && ($row['assignment_source'] ?? 'auto') === 'manual') { return true; }
+        }
+        return false;
+    }
+
     private function EnsureDevice(string $code, string $name, string $type, string $apiKey, string $role, string $now, array &$devices, array &$deviceKeys): void
     {
         $existing = $devices[$code] ?? [];
         $devices[$code] = ['code' => $code, 'name' => $name, 'device_type' => $type, 'confidence' => '80', 'status_key' => $role === 'status' ? $apiKey : ($existing['status_key'] ?? ''), 'value_key' => ($role === 'value' || $role === 'measurement') ? $apiKey : ($existing['value_key'] ?? ''), 'first_seen' => $existing['first_seen'] ?? $now, 'last_seen' => $now];
-        $deviceKeys[] = ['device_code' => $code, 'api_key' => $apiKey, 'role' => $role, 'is_required' => in_array($role, ['status', 'value', 'measurement'], true) ? '1' : '0', 'direction' => 'read'];
+        $deviceKeys[] = ['device_code' => $code, 'api_key' => $apiKey, 'role' => $role, 'is_required' => in_array($role, ['status', 'value', 'measurement'], true) ? '1' : '0', 'direction' => 'read', 'assignment_source' => 'auto'];
     }
 
     private function ApiGet(array $keys): array
@@ -628,7 +734,36 @@ class BayrolDiscovery extends IPSModule
     }
 
     private function GetObservationCounts(): array { $counts = []; foreach ($this->ReadCsvAssoc('observations') as $o) { $key = $o['api_key'] ?? ''; if ($key !== '') { $counts[$key] = ($counts[$key] ?? 0) + 1; } } return $counts; }
-    private function GetDeviceByKeyMap(): array { $map = []; foreach ($this->ReadCsvAssoc('device_keys') as $dk) { if (($dk['api_key'] ?? '') !== '') { $map[$dk['api_key']] = $dk['device_code'] ?? ''; } } return $map; }
+
+    private function GetDeviceByKeyMap(): array
+    {
+        $map = [];
+        $source = [];
+        foreach ($this->ReadCsvAssoc('device_keys') as $dk) {
+            $key = $dk['api_key'] ?? '';
+            if ($key === '') { continue; }
+            $rowSource = $dk['assignment_source'] ?? 'auto';
+            if (!isset($map[$key]) || $rowSource === 'manual' || ($source[$key] ?? '') !== 'manual') {
+                $map[$key] = $dk['device_code'] ?? '';
+                $source[$key] = $rowSource;
+            }
+        }
+        return $map;
+    }
+
+    private function GetAssignmentSourceByKeyMap(): array
+    {
+        $map = [];
+        foreach ($this->ReadCsvAssoc('device_keys') as $dk) {
+            $key = $dk['api_key'] ?? '';
+            if ($key === '') { continue; }
+            $source = $dk['assignment_source'] ?? 'auto';
+            if (!isset($map[$key]) || $source === 'manual') { $map[$key] = $source; }
+        }
+        return $map;
+    }
+
+    private function GetAssignmentSourceForApiKey(string $key): string { $map = $this->GetAssignmentSourceByKeyMap(); return $map[$key] ?? ''; }
     private function GetDeviceForApiKey(string $key): string { $map = $this->GetDeviceByKeyMap(); return $map[$key] ?? ''; }
     private function ParseSuffixes(string $raw): array { $raw = str_replace(["\r\n", "\r", ',', ';'], "\n", $raw); $result = []; foreach (explode("\n", $raw) as $line) { $s = trim($line); if ($s !== '' && preg_match('/^[A-Za-z0-9_]+$/', $s)) { $result[$s] = $s; } } return array_values($result ?: ['value']); }
     private function DetectValueType(string $value): string { $n = str_replace(',', '.', $value); if ($value === '0' || $value === '1') { return 'boolean-candidate'; } return is_numeric($n) ? (strpos($n, '.') === false ? 'integer' : 'float') : 'string'; }
