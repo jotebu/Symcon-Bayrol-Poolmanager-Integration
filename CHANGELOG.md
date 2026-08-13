@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 Build 17
+
+- API-Key Browser auf den aktuell konfigurierten Scanbereich begrenzt
+- Gruppenbereich, Objekt-ID-Bereich und konfigurierte Suffixe werden beim Laden des Browsers beruecksichtigt
+- Gruppen 34 und 44 zeigen auch im Browser ausschliesslich ihre dokumentierten festen Objekt-IDs
+- Historische API-Keys bleiben unveraendert in der CSV-Datenbank gespeichert
+
 ## 0.2.0 Build 16
 
 - Regression aus Build 15 behoben: Action-Felder und Listen wieder auf der obersten Formularebene, damit alle Buttons ihre Feld- und Zeilenauswahl korrekt erhalten

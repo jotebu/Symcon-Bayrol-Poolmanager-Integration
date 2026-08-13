@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../BayrolDiscovery/module.php', import.meta.url), 'utf8');
 const library = JSON.parse(fs.readFileSync(new URL('../library.json', import.meta.url), 'utf8'));
 
-assert.equal(library.build, 16, 'library build must be 16');
+assert.equal(library.build, 17, 'library build must be 17');
 assert.doesNotMatch(source, /private function BuildScanKeys\(\):array\{[^}]*\brange\(/s, 'BuildScanKeys must not allocate ranges');
 
 const documentedMatch = source.match(/private const DOCUMENTED_OBJECT_IDS=\[\s*34=>\[([^\]]+)\],\s*44=>\[([^\]]+)\]/s);
@@ -25,5 +25,6 @@ for (const field of ['SelectedApiKeyComment', 'SelectedGatewayVariableName', 'Ap
 }
 assert.match(source, /'name'=>'BrowserList'/, 'action field BrowserList missing');
 assert.match(source, /'name'=>'DeviceList'/, 'action field DeviceList missing');
+assert.match(source, /if\(!\$this->IsApiKeyInConfiguredScanScope\(\$k\)\)continue;/, 'browser rows must be filtered by scan scope');
 
 console.log('Static discovery regression tests passed.');

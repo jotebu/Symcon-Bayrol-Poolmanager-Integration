@@ -70,6 +70,20 @@ $limited = scanKeys($module, [
 ]);
 assertTrue(count($limited) === 500, 'ScanMaxKeys muss auch bei maximalen Bereichen strikt eingehalten werden.');
 
+$module->properties = [
+    'ScanGroupStart' => 34,
+    'ScanGroupEnd' => 34,
+    'ScanObjectStart' => 4000,
+    'ScanObjectEnd' => 17200,
+    'ScanSuffixes' => 'value'
+];
+$scopeMethod = new ReflectionMethod($module, 'IsApiKeyInConfiguredScanScope');
+$scopeMethod->setAccessible(true);
+assertTrue($scopeMethod->invoke($module, '34.4001.value'), 'Konfigurierter Key der Gruppe 34 muss im Browser sichtbar sein.');
+assertTrue(!$scopeMethod->invoke($module, '55.17106.value'), 'Key ausserhalb der konfigurierten Gruppe darf nicht im Browser sichtbar sein.');
+assertTrue(!$scopeMethod->invoke($module, '34.4002.value'), 'Nicht dokumentierte Objekt-ID der Gruppe 34 darf nicht im Browser sichtbar sein.');
+assertTrue(!$scopeMethod->invoke($module, '34.4001.status'), 'Nicht konfiguriertes Suffix darf nicht im Browser sichtbar sein.');
+
 $form = json_decode($module->GetConfigurationForm(), true, 512, JSON_THROW_ON_ERROR);
 foreach ($form['actions'] as $action) {
     assertTrue(($action['type'] ?? '') !== 'ExpansionPanel', 'Action-Felder duerfen nicht in ExpansionPanels verschachtelt sein.');
