@@ -37,6 +37,7 @@ Das Modul `BayrolDiscovery` bietet aktuell:
 
 - read-only Zugriff auf die PM5-WebGUI-API
 - konfigurierbare API-Key-Scans
+- feste, offiziell dokumentierte Objekt-ID-Listen fuer die Gruppen `34` (Parameter/Messwerte) und `44` (Alarme)
 - CSV-Storage unter `user/BayrolDiscovery`
 - Schema-Version 2 mit automatischer Header-Migration
 - Scan-Historie und Beobachtungshistorie

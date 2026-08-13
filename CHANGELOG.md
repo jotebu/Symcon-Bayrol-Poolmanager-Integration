@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 Build 15
+
+- Discovery-Formular in die Bereiche Verbindung, Scan, Datenspeicherung, API-Key Browser und Device-Zuordnung gegliedert
+- Gruppe 34 scannt nur noch die offiziell dokumentierten Parameter- und Messwert-Objekt-IDs
+- Gruppe 44 scannt nur noch die offiziell dokumentierten Alarm-Objekt-IDs
+- Dokumentierte Gruppen werden innerhalb eines Scans vor generischen Bereichen abgearbeitet
+- Konfigurierte Objekt-ID-Grenzen gelten weiterhin fuer alle anderen Gruppen
+
 ## 0.2.0 - Discovery Studio und Gateway-Bereinigung
 
 ### Gateway
