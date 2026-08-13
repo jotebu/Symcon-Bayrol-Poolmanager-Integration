@@ -23,6 +23,15 @@ class BayrolPoolManager5 extends IPSModule
         'FilterPumpText' => '55.17106.value'
     ];
 
+    /** Official numeric parameter and measurement values from the BAYROL PM5 Modbus-XML specification. */
+    private const DOCUMENTED_VALUES = [
+        'PHSetpoint'=>['34.3001.value','pH-Sollwert','float','BPM.pH',60],'PHAlarmLow'=>['34.3002.value','pH Untere Alarmgrenze','float','BPM.pH',61],'PHAlarmHigh'=>['34.3003.value','pH Obere Alarmgrenze','float','BPM.pH',62],
+        'ChlorineSetpoint'=>['34.3017.value','Chlor/Brom-Sollwert','float','BPM.Chlorine',70],'ChlorineAlarmLow'=>['34.3018.value','Chlor/Brom Untere Alarmgrenze','float','BPM.Chlorine',71],'ChlorineAlarmHigh'=>['34.3019.value','Chlor/Brom Obere Alarmgrenze','float','BPM.Chlorine',72],
+        'RedoxSetpoint1'=>['34.3049.value','Redox-Sollwert 1','integer','BPM.Redox',80],'RedoxSetpoint2'=>['34.3050.value','Redox-Sollwert 2','integer','BPM.Redox',81],'RedoxAlarmLow1'=>['34.3051.value','Redox Untere Alarmgrenze 1','integer','BPM.Redox',82],'RedoxAlarmLow2'=>['34.3052.value','Redox Untere Alarmgrenze 2','integer','BPM.Redox',83],'RedoxAlarmHigh1'=>['34.3053.value','Redox Obere Alarmgrenze 1','integer','BPM.Redox',84],'RedoxAlarmHigh2'=>['34.3054.value','Redox Obere Alarmgrenze 2','integer','BPM.Redox',85],
+        'TemperatureT1AlarmLow'=>['34.3069.value','T1 Untere Alarmgrenze','float','~Temperature',90],'TemperatureT1AlarmHigh'=>['34.3070.value','T1 Obere Alarmgrenze','float','~Temperature',91],'TemperatureT2AlarmLow'=>['34.3074.value','T2 Untere Alarmgrenze','float','~Temperature',92],'TemperatureT2AlarmHigh'=>['34.3075.value','T2 Obere Alarmgrenze','float','~Temperature',93],'TemperatureT3AlarmLow'=>['34.3079.value','T3 Untere Alarmgrenze','float','~Temperature',94],'TemperatureT3AlarmHigh'=>['34.3080.value','T3 Obere Alarmgrenze','float','~Temperature',95],'O2BasicDosingAmount'=>['34.3084.value','O2 Grunddosiermenge','float','BPM.Liters',96],
+        'pH'=>['34.4001.value','pH','float','BPM.pH',10],'FreeChlorineBromine'=>['34.4008.value','Freies Chlor/Brom','float','BPM.Chlorine',11],'Redox'=>['34.4022.value','Redox','integer','BPM.Redox',20],'PoolTemperature'=>['34.4033.value','Temperatur T1','float','~Temperature',30],'BatteryVoltage'=>['34.4047.value','Batteriespannung','float','BPM.Voltage',31],'TemperatureT2'=>['34.4069.value','Temperatur T2','float','~Temperature',32],'TemperatureT3'=>['34.4071.value','Temperatur T3','float','~Temperature',33],'O2DosedAmount'=>['34.4077.value','O2 Dosierte Menge','float','BPM.Liters',34]
+    ];
+
     public function Create()
     {
         parent::Create();
@@ -137,6 +146,7 @@ class BayrolPoolManager5 extends IPSModule
         try {
             $discoveryDefinitions = $this->LoadDiscoveryDefinitionsSafe();
             $keys = array_values(self::API_KEYS);
+            foreach (self::DOCUMENTED_VALUES as $definition) { $keys[] = $definition[0]; }
             foreach ($discoveryDefinitions as $definition) { $keys[] = $definition['api_key']; }
             $keys = array_values(array_unique($keys));
             $this->SendDebugMessage('UpdateValues', 'Reading ' . count($keys) . ' keys');
@@ -160,9 +170,10 @@ class BayrolPoolManager5 extends IPSModule
 
     private function RegisterVariables(): void
     {
-        $this->RegisterVariableFloat('pH', 'pH', 'BPM.pH', 10);
-        $this->RegisterVariableInteger('Redox', 'Redox', 'BPM.Redox', 20);
-        $this->RegisterVariableFloat('PoolTemperature', 'Pooltemperatur', '~Temperature', 30);
+        foreach (self::DOCUMENTED_VALUES as $ident => $definition) {
+            if ($definition[2] === 'integer') { $this->RegisterVariableInteger($ident, $definition[1], $definition[3], $definition[4]); }
+            else { $this->RegisterVariableFloat($ident, $definition[1], $definition[3], $definition[4]); }
+        }
         $this->RegisterVariableFloat('OutdoorTemperature', 'Aussentemperatur T3', '~Temperature', 40);
         $this->RegisterVariableFloat('Conductivity', 'Leitfaehigkeit', 'BPM.Conductivity', 50);
         $this->RegisterVariableBoolean('PoolLightActive', 'Lampen Becken aktiv', '~Switch', 100);
@@ -186,6 +197,9 @@ class BayrolPoolManager5 extends IPSModule
     private function CreateProfiles(): void
     {
         $this->CreateFloatProfile('BPM.pH', 'Gauge', '', '', 0, 14, 0.01, 2);
+        $this->CreateFloatProfile('BPM.Chlorine', 'Gauge', '', ' mg/l', 0, 10, 0.01, 2);
+        $this->CreateFloatProfile('BPM.Voltage', 'Electricity', '', ' V', 0, 5, 0.01, 2);
+        $this->CreateFloatProfile('BPM.Liters', 'Drops', '', ' l', 0, 1000, 0.1, 1);
         $this->CreateIntegerProfile('BPM.Redox', 'Electricity', '', ' mV', 0, 1000, 1);
         $this->CreateFloatProfile('BPM.Conductivity', 'Electricity', '', ' mS/cm', 0, 20, 0.1, 1);
         $this->CreateIntegerProfile('BPM.Milliseconds', 'Clock', '', ' ms', 0, 60000, 1);
@@ -214,9 +228,10 @@ class BayrolPoolManager5 extends IPSModule
 
     private function UpdateKnownVariables(array $data): void
     {
-        $this->SetFloatFromKey('pH', $data, self::API_KEYS['pH']);
-        $this->SetIntegerFromKey('Redox', $data, self::API_KEYS['Redox']);
-        $this->SetFloatFromKey('PoolTemperature', $data, self::API_KEYS['PoolTemperature']);
+        foreach (self::DOCUMENTED_VALUES as $ident => $definition) {
+            if ($definition[2] === 'integer') { $this->SetIntegerFromKey($ident, $data, $definition[0]); }
+            else { $this->SetFloatFromKey($ident, $data, $definition[0]); }
+        }
         $outdoor = $this->ExtractFirstNumber($this->CleanString((string) ($data[self::API_KEYS['OutdoorTemperatureText']] ?? '')));
         if ($outdoor !== null) { $this->SetValueSafe('OutdoorTemperature', $outdoor); }
         $conductivity = $this->ExtractFirstNumber($this->CleanString((string) ($data[self::API_KEYS['ConductivityText']] ?? '')));
@@ -296,10 +311,13 @@ class BayrolPoolManager5 extends IPSModule
 
     private function ApplyKnownImportSemantics(array $definition): array
     {
+        foreach (self::DOCUMENTED_VALUES as $known) {
+            if ($definition['api_key'] !== $known[0]) { continue; }
+            $definition['value_type'] = $known[2];
+            $definition['profile'] = $known[3];
+            return $definition;
+        }
         switch ($definition['api_key']) {
-            case '34.4001.value': $definition['value_type'] = 'float'; $definition['profile'] = 'BPM.pH'; break;
-            case '34.4022.value': $definition['value_type'] = 'integer'; $definition['profile'] = 'BPM.Redox'; break;
-            case '34.4033.value': $definition['value_type'] = 'float'; $definition['profile'] = '~Temperature'; break;
             case '55.17102.status':
             case '55.17106.status': $definition['value_type'] = 'boolean-candidate'; $definition['profile'] = '~Switch'; $definition['transform'] = 'active_when_zero'; break;
             case '55.17106.opmode': $definition['value_type'] = 'integer'; $definition['profile'] = 'BPM.FilterOpmode'; break;

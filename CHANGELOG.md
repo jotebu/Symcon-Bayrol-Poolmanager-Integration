@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 Build 18
+
+- Vollstaendiger offizieller Wertekatalog fuer alle 27 dokumentierten Keys der Gruppe 34
+- Deutsche Namen, Datentypen, Semantik, Profile und Einheiten im Discovery-Modul hinterlegt
+- Bereits gespeicherte CSV-Zeilen erhalten fehlende offizielle Metadaten automatisch, ohne benutzerdefinierte Werte zu ueberschreiben
+- Alle 27 dokumentierten numerischen Parameter und Messwerte werden nativ im Hauptmodul angelegt und zyklisch gelesen
+- CSV-Import wendet fuer alle dokumentierten Gruppe-34-Werte die bekannten Datentypen und Profile an
+- Alarme der Gruppe 44 bleiben getrennt, da das offizielle Protokoll dort `active` und `displayed` statt numerischer Messwerte dokumentiert
+
 ## 0.2.0 Build 17
 
 - API-Key Browser auf den aktuell konfigurierten Scanbereich begrenzt

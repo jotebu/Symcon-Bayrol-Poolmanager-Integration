@@ -10,6 +10,8 @@ Confidence levels:
 
 ## Measurements
 
+Alle 27 in der offiziellen BAYROL Modbus-XML-Spezifikation aufgefuehrten numerischen Parameter und Messwerte der Gruppe 34 sind im Discovery- und Hauptmodul hinterlegt. Dazu gehoeren Sollwerte, Alarmgrenzen, pH, Chlor/Brom, Redox, Temperaturen T1-T3, Batteriespannung sowie O2-Mengen.
+
 | API key | Meaning | Type | Unit | Confidence |
 |---|---|---|---|---|
 | 34.4001.value | pH | float string | pH | confirmed |

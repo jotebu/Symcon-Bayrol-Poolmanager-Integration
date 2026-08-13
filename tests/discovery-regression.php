@@ -84,6 +84,12 @@ assertTrue(!$scopeMethod->invoke($module, '55.17106.value'), 'Key ausserhalb der
 assertTrue(!$scopeMethod->invoke($module, '34.4002.value'), 'Nicht dokumentierte Objekt-ID der Gruppe 34 darf nicht im Browser sichtbar sein.');
 assertTrue(!$scopeMethod->invoke($module, '34.4001.status'), 'Nicht konfiguriertes Suffix darf nicht im Browser sichtbar sein.');
 
+$nameMethod = new ReflectionMethod($module, 'GetKnownName');
+$nameMethod->setAccessible(true);
+foreach ($group34 as $key) {
+    assertTrue($nameMethod->invoke($module, $key) !== '', 'Dokumentierter Gruppe-34-Key ohne Namen: ' . $key);
+}
+
 $form = json_decode($module->GetConfigurationForm(), true, 512, JSON_THROW_ON_ERROR);
 foreach ($form['actions'] as $action) {
     assertTrue(($action['type'] ?? '') !== 'ExpansionPanel', 'Action-Felder duerfen nicht in ExpansionPanels verschachtelt sein.');

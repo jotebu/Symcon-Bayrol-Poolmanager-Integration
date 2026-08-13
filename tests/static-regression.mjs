@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const source = fs.readFileSync(new URL('../BayrolDiscovery/module.php', import.meta.url), 'utf8');
 const library = JSON.parse(fs.readFileSync(new URL('../library.json', import.meta.url), 'utf8'));
 
-assert.equal(library.build, 17, 'library build must be 17');
+assert.equal(library.build, 18, 'library build must be 18');
 assert.doesNotMatch(source, /private function BuildScanKeys\(\):array\{[^}]*\brange\(/s, 'BuildScanKeys must not allocate ranges');
 
 const documentedMatch = source.match(/private const DOCUMENTED_OBJECT_IDS=\[\s*34=>\[([^\]]+)\],\s*44=>\[([^\]]+)\]/s);
@@ -26,5 +26,16 @@ for (const field of ['SelectedApiKeyComment', 'SelectedGatewayVariableName', 'Ap
 assert.match(source, /'name'=>'BrowserList'/, 'action field BrowserList missing');
 assert.match(source, /'name'=>'DeviceList'/, 'action field DeviceList missing');
 assert.match(source, /if\(!\$this->IsApiKeyInConfiguredScanScope\(\$k\)\)continue;/, 'browser rows must be filtered by scan scope');
+
+const metadataMatch = source.match(/private const DOCUMENTED_VALUE_METADATA=\[(.*?)\n    \];/s);
+assert.ok(metadataMatch, 'documented value metadata missing');
+const metadataKeys = [...metadataMatch[1].matchAll(/'34\.\d+\.value'=>/g)];
+assert.equal(metadataKeys.length, 27, 'all 27 documented group 34 values need metadata');
+
+const gatewaySource = fs.readFileSync(new URL('../BayrolPoolManager/module.php', import.meta.url), 'utf8');
+const gatewayValuesMatch = gatewaySource.match(/private const DOCUMENTED_VALUES = \[(.*?)\n    \];/s);
+assert.ok(gatewayValuesMatch, 'gateway documented values missing');
+const gatewayKeys = [...gatewayValuesMatch[1].matchAll(/\['34\.\d+\.value'/g)];
+assert.equal(gatewayKeys.length, 27, 'gateway must contain all 27 documented group 34 values');
 
 console.log('Static discovery regression tests passed.');
