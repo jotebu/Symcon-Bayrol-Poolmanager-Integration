@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 Build 16
+
+- Regression aus Build 15 behoben: Action-Felder und Listen wieder auf der obersten Formularebene, damit alle Buttons ihre Feld- und Zeilenauswahl korrekt erhalten
+- Discovery-Formular weiterhin durch Abschnittsueberschriften gegliedert, ohne funktionskritische Verschachtelung
+- Scanbereiche mit dokumentierten Gruppen werden ohne grosse `range()`-Zwischenarrays erzeugt
+- Eingabewerte fuer Gruppen, Objekt-IDs, Scanlimit und Batchgroesse begrenzt
+- Regressionstest fuer die festen Objekt-IDs der Gruppen 34/44, das Scanlimit und die Action-Struktur hinzugefuegt
+
 ## 0.2.0 Build 15
 
 - Discovery-Formular in die Bereiche Verbindung, Scan, Datenspeicherung, API-Key Browser und Device-Zuordnung gegliedert
